@@ -19,6 +19,7 @@ import os
 import subprocess
 
 from . import mjigsaw
+from . import moceanmesh
 from . import mgmsh
 from . import tools
 from .boundary import Boundary
@@ -211,6 +212,18 @@ class tri2d:
                 self.boundary = boundary
 
             g, bg = mjigsaw.get(self.boundary.contours, **kwargs)  # create mesh with JIGSAW
+
+            self.Dataset = g
+
+            self.bgmesh = bg
+
+        elif mesh_generator == "oceanmesh":
+            if boundary is None:
+                self.boundary = Boundary(**kwargs)
+            else:
+                self.boundary = boundary
+
+            g, bg = moceanmesh.get(self.boundary.contours, **kwargs)  # create mesh with OCEANMESH
 
             self.Dataset = g
 

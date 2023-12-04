@@ -1,10 +1,12 @@
 channels:
   - conda-forge
   - gbrey
+  - tomsail
 dependencies:
   - compilers
   - eccodes
   - ffmpeg
+  - cgal
   - gdal
   - geos
   - gmsh>=4.9.3
@@ -12,3 +14,4 @@ dependencies:
   - pip
   - proj
   - python=3.9
+  - opentelemac

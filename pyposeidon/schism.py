@@ -447,7 +447,7 @@ class Schism:
 
         if dpath:
             self.dem = pdem.Dem(**kwargs)
-            kwargs.update({"dem_source": self.dem.Dataset})
+            # kwargs.update({"dem_source": self.dem.Dataset})
         else:
             logger.info("no dem available\n")
 

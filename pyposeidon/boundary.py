@@ -17,6 +17,7 @@ import shapely
 from tqdm.auto import tqdm
 from pyposeidon.utils.coastfix import simplify
 import sys
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ class Boundary:
         cbuffer = kwargs.get("cbuffer", None)
         blevels = kwargs.get("blevels", None)
         prad = kwargs.get("R", 1.0)
+        rpath = kwargs.get("rpath", ".")
 
         # COASTLINES
         if coastlines is None:
@@ -134,6 +136,14 @@ class Boundary:
                 logger.error("coastlines are missing .. exiting\n")
                 sys.exit(1)
 
+            if not os.path.exists(rpath):
+                os.makedirs(rpath)
+            gpath = os.path.join(rpath, "oceanmesh")
+            if not os.path.exists(gpath):
+                os.makedirs(gpath)
+
+            self.coasts.set_crs(epsg=4326, inplace=True)
+            self.coasts.to_file(os.path.join(gpath, "coasts.shp"), driver="ESRI Shapefile")
             df = global_tag(self.coasts, cbuffer, blevels, R=prad)
         elif isinstance(self.geometry, gp.GeoDataFrame):
             df = self.geometry
@@ -528,9 +538,13 @@ def global_tag(geo, cbuffer, blevels, R=1):
 
     ww = gp.GeoDataFrame(geometry=cs)
 
-    gw = gp.GeoDataFrame(
-        geometry=list(ww.buffer(0).unary_union.geoms)
-    )  # merge the polygons that are split (around -180/180)
+    union_geometry = ww.buffer(0).unary_union
+    if isinstance(union_geometry, shapely.MultiPolygon):
+        gw = gp.GeoDataFrame(
+            geometry=list(union_geometry.geoms)
+        )  # merge the polygons that are split (around -180/180)
+    else:
+        gw = gp.GeoDataFrame(geometry=[union_geometry])  # merge the polygons that are split (around -180/180)
 
     gw = gp.GeoDataFrame(geometry=gw.boundary.values)
 

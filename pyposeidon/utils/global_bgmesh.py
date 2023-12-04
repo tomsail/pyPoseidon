@@ -76,6 +76,19 @@ def make_bgmesh_global(dfb, fpos, dem, **kwargs):
 
         to_hfun_grid(dh, fpos)  # write bgmesh file
 
+    elif mesh_generator == "oceanmesh":
+        dh = xr.Dataset(
+            {"h": (["longitude", "latitude"], nodes.d2.values.reshape(ui.shape))},
+            coords={
+                "longitude": ("longitude", d1.flatten()),
+                "latitude": ("latitude", d2.flatten()),
+            },
+        )
+
+        logger.info("Save pre-process bgmesh to {}".format(fpos))
+
+        dh.to_netcdf(fpos)  # save bgmesh
+
     rpath = kwargs.get("rpath", ".")
 
     logger.info("Create interim global scale mesh")

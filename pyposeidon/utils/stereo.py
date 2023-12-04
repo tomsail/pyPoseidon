@@ -49,7 +49,11 @@ def to_lat_lon(x, y, z=None, R=1):
     rad = x**2 + y**2 + z**2
     rad = np.sqrt(rad)
 
-    rad[rad == 0] = rad.max()
+    # Check if rad is an array and handle zero values
+    if isinstance(rad, float):
+        rad = np.finfo(float).eps  # use a very small number to avoid division by zero
+    else:
+        rad[rad == 0] = np.max(rad)
 
     rlat = np.arcsin(z / rad)
     rlon = np.arctan2(y, x)
