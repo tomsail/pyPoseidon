@@ -61,7 +61,7 @@ def test_io(pytestconfig, tmpdir, ggor, bgmesh, bindings):
 
 
 @pytest.mark.schism
-@pytest.mark.parametrize("ggor,cbuffer", [("jigsaw", 0.001), ("gmsh", None), ('oceanmesh', None)])
+@pytest.mark.parametrize("ggor,cbuffer", [("jigsaw", 0.001), ("gmsh", None), ("oceanmesh", None)])
 @pytest.mark.parametrize("bgmesh", [None, DEM_FILE, DEM_FILE])
 @pytest.mark.parametrize("bindings", [True, False, True])
 def test_validate(pytestconfig, tmpdir, ggor, cbuffer, bgmesh, bindings):

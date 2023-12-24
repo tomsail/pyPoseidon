@@ -75,6 +75,8 @@ numba = { version = ">=0.51", optional = true }
 spatialpandas = { version = "*", optional = true }
 vtk = {version = "*", optional = true}
 oceanmesh = {path = "../oceanmesh"}
+mpi4py = "^3.1.5"
+scikit-learn = "^1.3.2"
 
 [tool.poetry.extras]
 viz = [
