@@ -110,28 +110,30 @@ def check_mesh(ds, stereo_to_ll=False):
     if cw_.sum() > 0:
         logger.info(" > reversed " + str(cw_.sum()) + " CW triangles")
 
-    # CREATE NEW DATASET TO REMOVE FLAT TRIANGLES
     if flat_.sum() > 0:
         non_flat_tris = tris[~flat_]
-        nodes_ = np.unique(non_flat_tris)
+        if non_flat_tris.size > 0:  # Check if non_flat_tris is not empty
+            nodes_ = np.unique(non_flat_tris)
 
-        # Create a mapping from old indices to new indices
-        map_old_new_ = {old_idx: new_idx for new_idx, old_idx in enumerate(nodes_)}
+            # Create a mapping from old indices to new indices
+            map_old_new_ = {old_idx: new_idx for new_idx, old_idx in enumerate(nodes_)}
 
-        # Apply the mapping to update the indices in non_flat_tris
-        non_flat_tris_mapped = np.vectorize(map_old_new_.get)(non_flat_tris)
+            # Apply the mapping to update the indices in non_flat_tris
+            non_flat_tris_mapped = np.vectorize(map_old_new_.get)(non_flat_tris)
 
-        x_ = ds.SCHISM_hgrid_node_x.values[nodes_]
-        y_ = ds.SCHISM_hgrid_node_y.values[nodes_]
+            x_ = ds.SCHISM_hgrid_node_x.values[nodes_]
+            y_ = ds.SCHISM_hgrid_node_y.values[nodes_]
 
-        # using oceanmesh to cleanup and fix the mesh
-        points, cells = om.make_mesh_boundaries_traversable(np.column_stack((x_, y_)), non_flat_tris_mapped)
-        points, cells = om.delete_faces_connected_to_one_face(points, cells)
+            # using oceanmesh to cleanup and fix the mesh
+            points, cells = om.make_mesh_boundaries_traversable(np.column_stack((x_, y_)), non_flat_tris_mapped)
+            points, cells = om.delete_faces_connected_to_one_face(points, cells)
 
-        ds = om_to_xarray(points, cells, stereo_to_ll=stereo_to_ll)
-        logger.info(" > removed " + str(flat_.sum()) + " flat triangles")
-        logger.info(f" > Filtered {len(ds.node.values) - len(ds.node.values)} boundary nodes")
-        logger.info(f" > removed {len(tris) - len(cells)} elements in total.\n")
+            ds = om_to_xarray(points, cells, stereo_to_ll=stereo_to_ll)
+            logger.info(" > removed " + str(flat_.sum()) + " flat triangles")
+            logger.info(f" > Filtered {len(ds.node.values) - len(ds.node.values)} boundary nodes")
+            logger.info(f" > removed {len(tris) - len(cells)} elements in total.\n")
+    else:
+        logger.info("No flat triangles detected, no changes made.")
 
     return ds
 
