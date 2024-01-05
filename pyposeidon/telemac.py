@@ -41,12 +41,10 @@ from pyposeidon.paths import DATA_PATH
 from pyposeidon.utils.get_value import get_value
 from pyposeidon.utils.converter import myconverter
 from pyposeidon.utils.cpoint import closest_node
-from pyposeidon.utils.unml import unml
 from pyposeidon.utils import data
 from pyposeidon.utils.norm import normalize_column_names
 from pyposeidon.utils.norm import normalize_varnames
 from pyposeidon.utils.obs import get_obs_data
-from pyposeidon.utils.stereo import to_stereo
 
 # telemac (needs telemac stack on conda)
 from telapy.api.t2d import Telemac2d
@@ -62,8 +60,6 @@ from pretel.extract_contour import sorting_boundaries
 from utils.progressbar import ProgressBar
 from mpi4py import MPI
 
-import oceanmesh as om
-from pyposeidon.moceanmesh import om_to_xarray
 import numpy as np
 
 import logging
@@ -106,102 +102,61 @@ def calculate_time_step_hourly_multiple(resolution, min_water_depth=0.1, courant
 
 
 # Helper functions
-def is_ccw(tri, meshx, meshy):
-    x1, x2, x3 = meshx[tri]
-    y1, y2, y3 = meshy[tri]
+def is_ccw(tris, meshx, meshy):
+    x1, x2, x3 = meshx[tris].T
+    y1, y2, y3 = meshy[tris].T
     return (y3 - y1) * (x2 - x1) > (y2 - y1) * (x3 - x1)
 
 
-def make_clockwise(tri):
-    return np.flipud(tri)
+def flip(tris):
+    return np.column_stack((tris[:,2], tris[:,1], tris[:,0]))
 
 
-def make_clockwise2(tri):
-    # tri = [tri[0],tri[1],tri[2]] # CCW =
-    # tri = [tri[1],tri[2],tri[0]] # CCW =
-    # tri = [tri[2],tri[0],tri[1]] # CCW =
-    # tri = [tri[0],tri[2],tri[1]] # CW =
-    # tri = [tri[1],tri[0],tri[2]] # CW =
-    tri = [tri[2], tri[1], tri[0]]  # CW =
-    return tri
-
-
-def make_ccw(tri, meshx, meshy):
-    if not is_ccw(tri, meshx, meshy):
-        return make_clockwise(tri)
-    return tri
-
-
-def is_overlapping(tri, meshx):
+def is_overlapping(tris, meshx):
     PIR = 180
-    x1, x2, x3 = meshx[tri]
-    if abs(x2 - x1) > PIR and abs(x3 - x1) > PIR:
-        return True, 2
-    elif abs(x2 - x1) > PIR:
-        return True, 0
-    elif abs(x3 - x1) > PIR:
-        return True, 1
-    else:
-        return False, 0
+    x1, x2, x3 = meshx[tris].T
+    return np.logical_or(abs(x2 - x1) > PIR, abs(x3 - x1) > PIR)
 
 
-def det(tri, meshx, meshy):
-    t12 = meshx[tri[1]] - meshx[tri[0]]
-    t13 = meshx[tri[2]] - meshx[tri[0]]
-    t22 = meshy[tri[1]] - meshy[tri[0]]
-    t23 = meshy[tri[2]] - meshy[tri[0]]
-    return t12 * t23 - t22 * t13
+def get_det_mask(tris, meshx, meshy):
+    t12 = meshx[tris[:,1]] - meshx[tris[:,0]]
+    t13 = meshx[tris[:,2]] - meshx[tris[:,0]]
+    t22 = meshy[tris[:,1]] - meshy[tris[:,0]]
+    t23 = meshy[tris[:,2]] - meshy[tris[:,0]]
+    return t12 * t23 - t22 * t13 > 0
 
 
 def contains_pole(x, y):
-    if any(y == 90):
-        return True
-    else :
-        return False
+    return np.any(y == 90, axis = 0)
 
 
-def reverse_CCW(slf):
-    # copy arrays
-    x = copy.deepcopy(slf.meshx)
-    y = copy.deepcopy(slf.meshy)
-    ikle2 = copy.deepcopy(slf.ikle2)
-    count = 0
-    max = 0
-    pole_tris = []
-    mask = np.ones(len(ikle2), dtype=bool)
+def reverse_CCW(slf, corrections):
+    # Assuming slf.meshx, slf.meshy, and slf.ikle2 are NumPy arrays
+    ikle2 = np.array(slf.ikle2)
+    # Ensure all triangles are CCW
+    ccw_mask = is_ccw(ikle2, slf.meshx, slf.meshy)
+    ikle2[~ccw_mask] = flip(ikle2[~ccw_mask])
 
-    pbar = ProgressBar(len(ikle2))
+    # triangles accross the dateline  
+    m_ = is_overlapping(ikle2, slf.meshx)
+    ikle2[m_] = flip(ikle2[m_])
+    # Check for negative determinant
+    detmask =  get_det_mask(ikle2, slf.meshx, slf.meshy)
 
-    for i, tri in enumerate(ikle2):
-        # Ensure all triangles are CCW
-        tri = make_ccw(tri, x, y)
-        ikle2[i] = tri
+    # special case : pole triangles 
+    pole_mask = contains_pole(slf.meshx[ikle2].T, slf.meshy[ikle2].T)
 
-        # Check for negative determinant
-        if det(tri, x, y) < 0:
-            tri = make_ccw(tri, x, y)
-            ikle2[i] = tri
+    # manual additional corrections
+    if corrections is not None:
+        for rev in corrections['reverse']:
+            ikle2[rev:rev+1] = flip(ikle2[rev:rev+1])
+        for rem in corrections['remove']:
+            pole_mask[rem] = True
 
-        overlap_test = is_overlapping(tri, x)
-
-        lats = np.mean(y[tri])
-        if lats > max:
-            highest_tri = i
-            max = lats
-        if contains_pole(x[tri], y[tri]):
-            pole_tris.append(i)
-            mask[i] = False
-        elif overlap_test[0]:
-            count += 1
-            tri = make_clockwise(tri)
-            ikle2[i] = tri
-        pbar.update(i)
-    pbar.finish()
-    print(f"reversed {count} triangles")
-    print(f"highest triangle: {highest_tri}")
-    print(f"pole triangles: {pole_tris}")
+    print(f"reversed {m_.sum()} triangles")
+    print(f"pole triangles: {np.where(pole_mask)[0]}")
     print("[TEMPORARY FIX]: REMOVE THE POLE TRIANGLES")
-    return ikle2[mask,:]
+    return ikle2[~pole_mask,:]
 
 
 def write_netcdf(ds, outpath):
@@ -209,7 +164,7 @@ def write_netcdf(ds, outpath):
     ds.to_netcdf(fileOut)
 
 
-def ds_to_slf(ds, outpath, global_=True):
+def ds_to_slf(ds, outpath, corrections, global_=True):
     X = ds.SCHISM_hgrid_node_x.data
     Y = ds.SCHISM_hgrid_node_y.data
     Z = ds.depth.data
@@ -243,7 +198,7 @@ def ds_to_slf(ds, outpath, global_=True):
     slf.ikle2 = np.array(IKLE2)
     if global_:
         # adjust triangles orientation on the dateline
-        slf.ikle2 = reverse_CCW(slf)
+        slf.ikle2 = reverse_CCW(slf, corrections)
     slf.nelem2 = len(slf.ikle2)
     # ~~> sizes
     slf.ndp3 = 3
@@ -271,13 +226,6 @@ def ds_to_slf(ds, outpath, global_=True):
     slf.append_core_time_slf(0.0)
     slf.append_core_vars_slf([slf.meshz])
     slf.fole["hook"].close()
-    # import matplotlib.pyplot as plt
-    # from pyposeidon.utils.seam import get_seam
-    # fig, ax = plt.subplots()
-    # xn, yn, tri3n = get_seam(X, Y, None, IKLE2)  # get new arrays
-    # ax.tricontourf(*to_stereo(X, Y), slf.ikle2, Z)
-    # ax.triplot(*to_stereo(X, Y), slf.ikle2, lw=0.15, color="k")
-    # plt.show()
     return slf
 
 
@@ -451,22 +399,6 @@ def detect_boundary_points_optimized(connectivity_table, npoints):
 
     pbar.finish()
     bnd_points = np.unique(buf)
-    # Check for inconsistent lengths in connectivity_bnd_elt
-    elt_lengths = [len(elt) for elt in connectivity_bnd_elt]
-    # for il, ll in enumerate(elt_lengths):
-    #     if ll != 3:
-    #         print(il)
-    #         print(connectivity_bnd_elt[il])
-    #         import matplotlib.pyplot as plt
-    #         fig, ax = plt.subplots()
-    #         ax.triplot(tel.meshx, tel.meshy, tel.ikle2, color='k', linewidth=0.75)
-    #         points, cells = om.make_mesh_boundaries_traversable(np.column_stack((tel.meshx, tel.meshy)), tel.ikle2)
-    #         ax.scatter(tel.meshx[connectivity_bnd_elt[il]], tel.meshy[connectivity_bnd_elt[il]], c='r')
-    #         plt.show()
-
-    #         raise ValueError("Inconsistent element lengths in connectivity_bnd_elt")
-
-    bnd_points = np.unique(buf)
 
     return np.array(connectivity_bnd_elt), bnd_points
 
@@ -492,7 +424,7 @@ def write_cli(inTel, ds, outCli=None, rmodule="telemac2d", global_=True):
     connectivity_bnd_elt, bnd_points = detect_boundary_points_optimized(tel.ikle2, tel.npoin2)
 
     boundaries_ordered, bnd_idx_left, bnd_elt_left = sorting_boundaries(
-        tel, bnd_points, connectivity_bnd_elt, global_=True
+        tel, bnd_points, connectivity_bnd_elt, global_=global_
     )
     domains.append(boundaries_ordered)
 
@@ -501,7 +433,7 @@ def write_cli(inTel, ds, outCli=None, rmodule="telemac2d", global_=True):
         i += 1
 
         boundaries_ordered, bnd_idx_left, bnd_elt_left = sorting_boundaries(
-            tel, bnd_idx_left, bnd_elt_left, global_=True
+            tel, bnd_idx_left, bnd_elt_left, global_=global_
         )
         domains.append(boundaries_ordered)
 
@@ -931,6 +863,7 @@ class Telemac:
         flag = get_value(self, kwargs, "update", ["all"])
         split_by = get_value(self, kwargs, "meteo_split_by", None)
         rmodule = get_value(self, kwargs, "module", "telemac2d")
+        corrections = get_value(self, kwargs, "mesh_corrections", None)
 
         if not os.path.exists(path):
             os.makedirs(path)
@@ -954,7 +887,7 @@ class Telemac:
 
             logger.info("saving geometry file.. ")
             geo = os.path.join(path, "geo.slf")
-            slf = ds_to_slf(self.mesh.Dataset, geo, global_=True)
+            slf = ds_to_slf(self.mesh.Dataset, geo, corrections, global_=True)
             write_netcdf(self.mesh.Dataset, geo)
 
             # # WRITE METEO FILE
@@ -1337,9 +1270,9 @@ class Telemac:
         # Normalize Time Data
         sdate = pd.to_datetime(date, utc=True, format="%Y-%m-%d %H:%M %z")
         times = pd.to_datetime(slf.tags["times"], unit="s", origin=sdate.tz_convert(None))
-        logger.info("Length of slf.meshx:", len(slf.meshx))
-        logger.info("Length of slf.meshy:", len(slf.meshy))
-        logger.info("Length of depth values:", len(self.mesh.Dataset.depth.values))
+        logger.info(f"Length of slf.meshx: {len(slf.meshx)}")
+        logger.info(f"Length of slf.meshy: {len(slf.meshy)}")
+        logger.info(f"Length of depth values: {len(self.mesh.Dataset.depth.values)}")
         # Initialize first the xr.Dataset
         xc = xr.Dataset(
             {
