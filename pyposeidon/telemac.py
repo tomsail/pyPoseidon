@@ -590,6 +590,8 @@ class Telemac:
             logger.warning("model not set properly, No end_date\n")
             # ---------------------------------------------------------------------
 
+        self.tstep = kwargs.get("tstep", None)
+
         self.tag = tel_module
         self.tide = kwargs.get("tide", False)
         tpxo_ = kwargs.get("tpxo_source", None)
@@ -600,6 +602,10 @@ class Telemac:
         self.monitor = kwargs.get("monitor", False)
 
         self.solver_name = TELEMAC_NAME
+        # hotstart
+        hotstart = get_value(self, kwargs, "hotstart", None)
+        if hotstart:
+            self.hotstart = pd.to_datetime(hotstart)
 
         for attr, value in kwargs.items():
             if not hasattr(self, attr):
@@ -646,8 +652,13 @@ class Telemac:
         params["duration"] = duration
         # export grid data every hour
         res_min = get_value(self, kwargs, "resolution_min", 0.5)
-        tstep = calculate_time_step_hourly_multiple(res_min)
+
+        if self.tstep is None:
+            tstep = calculate_time_step_hourly_multiple(res_min)
+        else:
+            tstep = self.tstep
         params["tstep"] = tstep
+
         params["nb_tsteps"] = int(duration / tstep)
         params["tstep_graph"] = int(3600 / tstep)
         params["tstep_list"] = int(3600 / tstep)
@@ -658,16 +669,18 @@ class Telemac:
             params["initial_conditions"] = "TPXO SATELLITE ALTIMETRY"
 
         # hotstart
-        hotstart = get_value(self, kwargs, "hotstart", False)
-        if hotstart:
+        if self.hotstart:
+            hotout = int((self.hotstart - self.rdate).total_seconds() / (params["tstep"] * params["tstep_graph"]))
             params["hotstart"] = True
+            params["restart_tstep"] = hotout + 1
 
         # update
         if dic:
             for key in dic.keys():
                 params[key] = dic[key]
-        for key in kwargs["params"].keys():
-            params[key] = kwargs["params"][key]
+        if "params" in kwargs.keys():
+            for key in kwargs["params"].keys():
+                params[key] = kwargs["params"][key]
 
         self.params = params
 

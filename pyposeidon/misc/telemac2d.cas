@@ -35,7 +35,7 @@ MASS-BALANCE = {{ 'YES' if mass_balance else 'NO' }}
 /
 COMPUTATION CONTINUED = {{ 'YES' if computation_continued else 'NO' }} /Determines whether the computation under way is independent result or is following an earlier result
 {% if computation_continued %}
-PREVIOUS COMPUTATION FILE = {{ previous_computation_file}}
+PREVIOUS COMPUTATION FILE = {{ previous_computation_file }}
 PREVIOUS COMPUTATION FILE FORMAT = 'SERAFIND'
 {% else %}
 INITIAL CONDITIONS  = '{{initial_conditions}}'     /ZERO ELEVATION,
@@ -53,6 +53,7 @@ INITIAL CONDITIONS  = '{{initial_conditions}}'     /ZERO ELEVATION,
 {% if hotstart %}
 RESTART MODE = YES
 RESTART FILE = {{ restart_file }}
+RECORD NUMBER IN RESTART FILE = {{ restart_tstep }}
 RESTART FILE FORMAT = 'SERAFIND' {% endif %}
 /
 /---------------------------------------------------------------------
@@ -170,7 +171,6 @@ CONTINUITY CORRECTION                      = {{ 'YES' if continuity_correction e
 /----------------------------------------------
 {% if tracer %}
 TYPE OF ADVECTION               = 14;5;14
-DISCRETIZATIONS IN SPACE        = 11;11
 /
 NUMBER OF TRACERS         =     {{no_tracers}}
 /NAMES OF TRACERS                = 'TRACER 1'; 'TRACER 2'
