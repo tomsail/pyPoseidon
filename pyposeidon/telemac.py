@@ -31,6 +31,7 @@ import errno
 import dask
 from searvey import ioc
 from tqdm.auto import tqdm
+from scipy.spatial import Delaunay
 
 # local modules
 import pyposeidon
@@ -229,7 +230,7 @@ def ds_to_slf(ds, outpath, corrections, global_=True):
     return slf
 
 
-def write_meteo(outpath, geo, ds):
+def write_meteo(outpath, ds, gtype="grid"):
     lon = ds.longitude.values
     lat = ds.latitude.values
     #
@@ -270,63 +271,85 @@ def write_meteo(outpath, geo, ds):
     atm.varindex = range(atm.nvar)
 
     print("   +> setting connectivity")
-    # Sizes and mesh connectivity
-    atm.nplan = 1  # it should be 2d but why the heack not ...
-    atm.nx1d = len(lon)
-    atm.ny1d = len(lat)
-    atm.meshx = np.tile(lon, atm.ny1d).reshape(atm.ny1d, atm.nx1d).T.ravel()
-    atm.meshy = np.tile(lat, atm.nx1d)
-    atm.ndp2 = 3
-    atm.ndp3 = atm.ndp2
-    atm.npoin2 = atm.nx1d * atm.ny1d
-    atm.npoin3 = atm.npoin2
-    atm.nelem2 = 2 * (atm.nx1d - 1) * (atm.ny1d - 1)
-    atm.nelem3 = atm.nelem2
-    # set geometry
-    atm.ikle3 = np.zeros((atm.nelem2, atm.ndp3), dtype=int)
-    ielem = 0
-    for i in range(1, atm.nx1d):
-        for j in range(1, atm.ny1d):
-            ipoin = (i - 1) * atm.ny1d + j - 1
-            # ~~> first triangle
-            atm.ikle3[ielem][0] = ipoin
-            atm.ikle3[ielem][1] = ipoin + atm.ny1d
-            atm.ikle3[ielem][2] = ipoin + 1
-            ielem += 1
-            # ~~> second triangle
-            atm.ikle3[ielem][0] = ipoin + atm.ny1d
-            atm.ikle3[ielem][1] = ipoin + atm.ny1d + 1
-            atm.ikle3[ielem][2] = ipoin + 1
-            ielem += 1
+    if gtype == "grid":
+        # Sizes and mesh connectivity
+        atm.nplan = 1  # it should be 2d but why the heack not ...
+        atm.nx1d = len(lon)
+        atm.ny1d = len(lat)
+        atm.meshx = np.tile(lon, atm.ny1d).reshape(atm.ny1d, atm.nx1d).T.ravel()
+        atm.meshy = np.tile(lat, atm.nx1d)
+        atm.ndp2 = 3
+        atm.ndp3 = atm.ndp2
+        atm.npoin2 = atm.nx1d * atm.ny1d
+        atm.npoin3 = atm.npoin2
+        atm.nelem2 = 2 * (atm.nx1d - 1) * (atm.ny1d - 1)
+        atm.nelem3 = atm.nelem2
+        # set geometry
+        atm.ikle3 = np.zeros((atm.nelem2, atm.ndp3), dtype=int)
+        ielem = 0
+        for i in range(1, atm.nx1d):
+            for j in range(1, atm.ny1d):
+                ipoin = (i - 1) * atm.ny1d + j - 1
+                # ~~> first triangle
+                atm.ikle3[ielem][0] = ipoin
+                atm.ikle3[ielem][1] = ipoin + atm.ny1d
+                atm.ikle3[ielem][2] = ipoin + 1
+                ielem += 1
+                # ~~> second triangle
+                atm.ikle3[ielem][0] = ipoin + atm.ny1d
+                atm.ikle3[ielem][1] = ipoin + atm.ny1d + 1
+                atm.ikle3[ielem][2] = ipoin + 1
+                ielem += 1
+        # Boundaries
+        atm.ipob3 = np.zeros(atm.npoin3, dtype=int)
+        # along the x-axis (lon)
+        for i in range(atm.nx1d):
+            ipoin = i * atm.ny1d
+            atm.ipob3[ipoin] = i + 1
+            ipoin = i * atm.ny1d - 1
+            atm.ipob3[ipoin] = 2 * atm.nx1d + (atm.ny1d - 2) - i
+        # along the y-axis (lat)
+        for i in range(1, atm.ny1d):
+            ipoin = i
+            atm.ipob3[ipoin] = 2 * atm.nx1d + 2 * (atm.ny1d - 2) - i + 1
+            ipoin = atm.ny1d * (atm.nx1d - 1) + i
+            atm.ipob3[ipoin] = atm.nx1d + i
+        atm.ipob2 = atm.ipob3
+        # Boundary points
+        atm.iparam = [0, 0, 0, 0, 0, 0, 0, np.count_nonzero(atm.ipob2), 0, 1]
 
-    # Boundaries
-    atm.ipob3 = np.zeros(atm.npoin3, dtype=int)
-    # along the x-axis (lon)
-    for i in range(atm.nx1d):
-        ipoin = i * atm.ny1d
-        atm.ipob3[ipoin] = i + 1
-        ipoin = i * atm.ny1d - 1
-        atm.ipob3[ipoin] = 2 * atm.nx1d + (atm.ny1d - 2) - i
-    # along the y-axis (lat)
-    for i in range(1, atm.ny1d):
-        ipoin = i
-        atm.ipob3[ipoin] = 2 * atm.nx1d + 2 * (atm.ny1d - 2) - i + 1
-        ipoin = atm.ny1d * (atm.nx1d - 1) + i
-        atm.ipob3[ipoin] = atm.nx1d + i
-    atm.ipob2 = atm.ipob3
-    # Boundary points
-    atm.iparam = [0, 0, 0, 0, 0, 0, 0, np.count_nonzero(atm.ipob2), 0, 1]
+    else:
+        atm.nplan = 1  # it should be 2d but why the heack not ...
+        atm.meshx = lon
+        atm.meshy = lat
+        atm.nx1d = len(lon)
+        atm.ny1d = len(lat)
+        atm.ndp2 = 3
+        atm.ndp3 = atm.ndp2
+        atm.npoin2 = len(lon)
+        atm.npoin3 = atm.npoin2
+        tri = Delaunay(np.column_stack((lon, lat)))
+        atm.nelem2 = len(tri.simplices)
+        atm.nelem3 = atm.nelem2
+        atm.ikle3 = tri.simplices
+        # Boundaries
+        atm.ipob3 = np.zeros(atm.npoin3, dtype=int)
+        atm.iparam = [0, 0, 0, 0, 0, 0, 0, np.count_nonzero(atm.ipob2), 0, 1]
 
     print("   +> writing header")
     atm.nbv1 = len(atm.varnames)
     atm.nvar = atm.nbv1
     atm.varindex = range(atm.nvar)
 
-    t0 = pd.Timestamp(ds.time.values[0])
+    if gtype == "grid":
+        t0 = pd.Timestamp(ds.time.values[0])
+        seconds = (pd.DatetimeIndex(ds.time.values) - t0).total_seconds()
+    else:
+        t0 = pd.Timestamp(ds.time.values)
+        seconds = ds.step.values / 1e9
     atm.datetime = [t0.year, t0.month, t0.day, t0.hour, t0.minute, t0.second, 0]
-    atm.append_header_slf()
 
-    seconds = (pd.DatetimeIndex(ds.time.values) - t0).total_seconds()
+    atm.append_header_slf()
 
     print("     +> Write Selafin core")
     # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
@@ -339,7 +362,7 @@ def write_meteo(outpath, geo, ds):
             data = np.ravel(np.transpose(ds[var][itime].values))
             atm.append_core_vars_slf([data])
     atm.fole["hook"].close()
-    #
+
     # interpolate on geo mesh
     generate_atm(geo, tmpFile, outpath, None)
 
