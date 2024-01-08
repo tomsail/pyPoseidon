@@ -70,7 +70,7 @@ from . import tools
 logger = logging.getLogger(__name__)
 
 
-TELEMAC_NAME = "telemac2d"
+TELEMAC_NAME = "telemac"
 
 
 def divisors(n):
@@ -109,7 +109,7 @@ def is_ccw(tris, meshx, meshy):
 
 
 def flip(tris):
-    return np.column_stack((tris[:,2], tris[:,1], tris[:,0]))
+    return np.column_stack((tris[:, 2], tris[:, 1], tris[:, 0]))
 
 
 def is_overlapping(tris, meshx):
@@ -119,15 +119,15 @@ def is_overlapping(tris, meshx):
 
 
 def get_det_mask(tris, meshx, meshy):
-    t12 = meshx[tris[:,1]] - meshx[tris[:,0]]
-    t13 = meshx[tris[:,2]] - meshx[tris[:,0]]
-    t22 = meshy[tris[:,1]] - meshy[tris[:,0]]
-    t23 = meshy[tris[:,2]] - meshy[tris[:,0]]
+    t12 = meshx[tris[:, 1]] - meshx[tris[:, 0]]
+    t13 = meshx[tris[:, 2]] - meshx[tris[:, 0]]
+    t22 = meshy[tris[:, 1]] - meshy[tris[:, 0]]
+    t23 = meshy[tris[:, 2]] - meshy[tris[:, 0]]
     return t12 * t23 - t22 * t13 > 0
 
 
 def contains_pole(x, y):
-    return np.any(y == 90, axis = 0)
+    return np.any(y == 90, axis=0)
 
 
 def reverse_CCW(slf, corrections):
@@ -137,26 +137,26 @@ def reverse_CCW(slf, corrections):
     ccw_mask = is_ccw(ikle2, slf.meshx, slf.meshy)
     ikle2[~ccw_mask] = flip(ikle2[~ccw_mask])
 
-    # triangles accross the dateline  
+    # triangles accross the dateline
     m_ = is_overlapping(ikle2, slf.meshx)
     ikle2[m_] = flip(ikle2[m_])
     # Check for negative determinant
-    detmask =  get_det_mask(ikle2, slf.meshx, slf.meshy)
+    detmask = get_det_mask(ikle2, slf.meshx, slf.meshy)
 
-    # special case : pole triangles 
+    # special case : pole triangles
     pole_mask = contains_pole(slf.meshx[ikle2].T, slf.meshy[ikle2].T)
 
     # manual additional corrections
     if corrections is not None:
-        for rev in corrections['reverse']:
-            ikle2[rev:rev+1] = flip(ikle2[rev:rev+1])
-        for rem in corrections['remove']:
+        for rev in corrections["reverse"]:
+            ikle2[rev : rev + 1] = flip(ikle2[rev : rev + 1])
+        for rem in corrections["remove"]:
             pole_mask[rem] = True
 
     print(f"reversed {m_.sum()} triangles")
     print(f"pole triangles: {np.where(pole_mask)[0]}")
     print("[TEMPORARY FIX]: REMOVE THE POLE TRIANGLES")
-    return ikle2[~pole_mask,:]
+    return ikle2[~pole_mask, :]
 
 
 def write_netcdf(ds, outpath):
@@ -403,7 +403,7 @@ def detect_boundary_points_optimized(connectivity_table, npoints):
     return np.array(connectivity_bnd_elt), bnd_points
 
 
-def write_cli(inTel, ds, outCli=None, rmodule="telemac2d", global_=True):
+def write_cli(inTel, ds, outCli=None, tel_module="telemac2d", global_=True):
     """
     (This function is a modification of the existing extract_contour() function
     in scripts/python3/pretel/extract_contour.py of the TELEMAC scripts)
@@ -480,7 +480,7 @@ def write_cli(inTel, ds, outCli=None, rmodule="telemac2d", global_=True):
                     "nbor",
                     "k",
                 ]
-                if rmodule == "telemac2d":
+                if tel_module == "telemac2d":
                     line = " ".join(str(boundary_settings[key]) for key in keys_order)
                     lines.append(line)
                 bnd_node += 1
@@ -498,7 +498,7 @@ def write_cli(inTel, ds, outCli=None, rmodule="telemac2d", global_=True):
     return domains_bnd
 
 
-def write_cas(outpath, rmodule, params):
+def write_cas(outpath, tel_module, params):
     # Load the Jinja2 template
     env = jinja2.Environment(loader=jinja2.FileSystemLoader(os.path.join(DATA_PATH)))
 
@@ -507,9 +507,9 @@ def write_cas(outpath, rmodule, params):
         return ";".join([str(value)] * count)
 
     env.filters["repeat_value"] = repeat_value
-    template = env.get_template(rmodule + ".cas")
+    template = env.get_template(tel_module + ".cas")
     ouput = template.render(params)
-    with open(os.path.join(outpath, rmodule + ".cas"), "w") as f:
+    with open(os.path.join(outpath, tel_module + ".cas"), "w") as f:
         f.write(ouput)
 
 
@@ -524,8 +524,8 @@ class Telemac:
 
 
         """
-        rmodule = kwargs.get("module", "telemac2d")
-        if rmodule not in ["telemac3d", "telemac2d", "artemis", "tomawac"]:
+        tel_module = kwargs.get("module", "telemac2d")
+        if tel_module not in ["telemac3d", "telemac2d", "artemis", "tomawac"]:
             raise ValueError("module must be one of the following: telemac3d, telemac2d, artemis, tomawac")
 
         rfolder = kwargs.get("rfolder", None)
@@ -590,7 +590,7 @@ class Telemac:
             logger.warning("model not set properly, No end_date\n")
             # ---------------------------------------------------------------------
 
-        self.tag = kwargs.get("tag", "telemac")
+        self.tag = tel_module
         self.tide = kwargs.get("tide", False)
         tpxo_ = kwargs.get("tpxo_source", None)
         if tpxo_ is not None:
@@ -598,8 +598,6 @@ class Telemac:
 
         self.atm = kwargs.get("atm", True)
         self.monitor = kwargs.get("monitor", False)
-
-        self.epath = tools.resolve_schism_path(instance=self, kwargs=kwargs)
 
         self.solver_name = TELEMAC_NAME
 
@@ -615,27 +613,28 @@ class Telemac:
     def config(self, config_file=None, output=False, **kwargs):
         dic = get_value(self, kwargs, "parameters", None)
         #        param_file = get_value(self,kwargs,'config_file',None)
-        rmodule = kwargs.get("module", "telemac2d")
+
         if config_file:
             # ---------------------------------------------------------------------
             logger.info("reading parameter file {}\n".format(config_file))
             # ---------------------------------------------------------------------
         else:
             # ---------------------------------------------------------------------
-            logger.info("using default " + rmodule + " CAS file ...\n")
+            logger.info("using default " + self.tag + " json config file ...\n")
             # ---------------------------------------------------------------------
 
-            config_file = os.path.join(DATA_PATH, rmodule + ".json")
+            config_file = os.path.join(DATA_PATH, self.tag + ".json")
 
         # Load the parameters from the JSON file
         with open(config_file, "r") as json_file:
-            params = json.load(json_file)
+            config = json.load(json_file)
+            params = config["params"]
 
         # update key values
-        if "telemac" in rmodule:
+        if "telemac" in self.tag:
             params["datestart"] = self.start_date.strftime("%Y;%m;%d")
             params["timestart"] = self.start_date.strftime("%H;%M;%S")
-        elif "tomawac" in rmodule:
+        elif "tomawac" in self.tag:
             params["datestart"] = self.start_date.strftime("%Y%m%d%H%M")
 
         if hasattr(self, "time_frame"):
@@ -658,20 +657,27 @@ class Telemac:
             params["tide"] = True
             params["initial_conditions"] = "TPXO SATELLITE ALTIMETRY"
 
+        # hotstart
+        hotstart = get_value(self, kwargs, "hotstart", False)
+        if hotstart:
+            params["hotstart"] = True
+
         # update
         if dic:
             for key in dic.keys():
                 params[key] = dic[key]
+        for key in kwargs["params"].keys():
+            params[key] = kwargs["params"][key]
 
         self.params = params
 
         if output:
             # save params
             # ---------------------------------------------------------------------
-            logger.info("output" + rmodule + " CAS file ...\n")
+            logger.info("output " + self.tag + " CAS file ...\n")
             # ---------------------------------------------------------------------
             path = get_value(self, kwargs, "rpath", "./telemac/")
-            write_cas(path, rmodule, params)
+            write_cas(path, self.tag, params)
 
     # ============================================================================================
     # METEO
@@ -700,6 +706,13 @@ class Telemac:
             ap["time"] = ap.time.values + pd.to_timedelta("1H")
 
             self.meteo.Dataset = xr.concat([self.meteo.Dataset, ap], dim="time")
+
+    @staticmethod
+    def to_force(ds, geo, outpath):
+        # # WRITE METEO FILE
+        logger.info("saving meteo file.. ")
+        meteo = os.path.join(outpath, "input_wind.slf")
+        write_meteo(meteo, geo, ds)
 
     # ============================================================================================
     # TPXO
@@ -862,15 +875,10 @@ class Telemac:
         path = get_value(self, kwargs, "rpath", "./telemac/")
         flag = get_value(self, kwargs, "update", ["all"])
         split_by = get_value(self, kwargs, "meteo_split_by", None)
-        rmodule = get_value(self, kwargs, "module", "telemac2d")
         corrections = get_value(self, kwargs, "mesh_corrections", None)
 
         if not os.path.exists(path):
             os.makedirs(path)
-
-        # save meteo file
-        meteo_path = os.path.join(path, "atm")
-        os.makedirs(meteo_path, exist_ok=True)
 
         # Mesh related files
         if self.mesh.Dataset is not None:
@@ -908,7 +916,7 @@ class Telemac:
 
             # WRITE CAS FILE
             logger.info("saving CAS file.. ")
-            write_cas(path, rmodule, self.params)
+            write_cas(path, self.tag, self.params)
 
         # ---------------------------------------------------------------------
         logger.info("output done\n")
@@ -917,14 +925,13 @@ class Telemac:
     def run(self, **kwargs):
         calc_dir = get_value(self, kwargs, "rpath", "./telemac/")
         cwd = os.getcwd()
-        rmodule = get_value(self, kwargs, "module", "telemac2d")
 
         # ---------------------------------------------------------------------
         logger.info("executing model\n")
         # ---------------------------------------------------------------------
         comm = MPI.COMM_WORLD
 
-        cas_file = rmodule + ".cas"
+        cas_file = self.tag + ".cas"
         os.chdir(calc_dir)
         if not tools.is_mpirun_installed():
             logger.warning("mpirun is not installed, ending.. \n")
@@ -937,7 +944,7 @@ class Telemac:
         _ = study.variables
 
         study.set_case()
-        # Initalization
+        # Initialization
         study.init_state_default()
         # Run all time steps
         ntimesteps = study.get("MODEL.NTIMESTEPS")
@@ -1004,43 +1011,18 @@ class Telemac:
         json.dump(dic, open(filename, "w"), indent=4, default=myconverter)
 
     def execute(self, **kwargs):
-        flag = get_value(self, kwargs, "update", ["all"])
-        if flag:
-            self.create(**kwargs)
-            self.output(**kwargs)
-            if self.monitor:
-                self.set_obs()
-            self.save(**kwargs)
-            self.run(**kwargs)
-
-        else:
-            self.save(**kwargs)
-
-            calc_dir = get_value(self, kwargs, "rpath", "./telemac/")
-
-            tools.create_mpirun_script(
-                target_dir=calc_dir,
-                cmd=self.epath,
-                script_name="launchSchism.sh",
-            )
-
-            self.run(**kwargs)
+        self.create(**kwargs)
+        self.output(**kwargs)
+        if self.monitor:
+            self.set_obs()
+        self.save(**kwargs)
+        self.run(**kwargs)
 
     def read_folder(self, rfolder, **kwargs):
         self.rpath = rfolder
-        s = glob.glob(os.path.join(rfolder, "/param.nml"))
-        mfiles1 = glob.glob(os.path.join(rfolder, "/sflux/*_1*.nc"))
-        mfiles1.sort()
-        # check for 2nd meteo
-        mfiles2 = glob.glob(os.path.join(rfolder, "/sflux/*_2*.nc"))
-        mfiles2.sort()
-
-        mfiles = {"1": mfiles1, "2": mfiles2}
-
-        mfiles = {k: v for k, v in mfiles.items() if v}  # remove empty keys, e.g. no mfiles2
-
-        hfile = os.path.join(rfolder, "/hgrid.gr3")  # Grid
-        self.params = f90nml.read(s[0])
+        geo = glob.glob(os.path.join(rfolder, "/geo.slf"))
+        cli = glob.glob(os.path.join(rfolder, "/geo.cli"))
+        mfiles = glob.glob(os.path.join(rfolder, "/input_wind.slf"))
 
         mykeys = ["start_year", "start_month", "start_day"]
         sdate = [self.params["opt"][x] for x in mykeys]  # extract date info from param.nml
@@ -1108,50 +1090,19 @@ class Telemac:
             logger.warning("no meteo loaded")
 
     def hotstart(self, it=None, **kwargs):
-        path = get_value(self, kwargs, "rpath", "./telemac/")
+        ppath = get_value(self, kwargs, "ppath", None)
 
-        if not "melems" in self.misc:
-            self.global2local(**kwargs)
-
-        hfiles = glob.glob(os.path.join(path, f"outputs/hotstart_*_{it}.nc"))
-        hfiles.sort()
-
+        # 1 - Generate the NetCDF hotstart file
+        if self.tag == "telemac2d":
+            hfiles = glob.glob(os.path.join(ppath, f"outputs/tel_out2D.nc"))
         # store them in a list
         out = []
         for i in range(len(hfiles)):
             out.append(xr.open_dataset(hfiles[i]))
-
-        # Create dataset
-        side = []
-        node = []
-        el = []
-        one = []
-
-        for key in out[0].variables:
-            if "nResident_side" in out[0][key].dims:
-                r = self.combine_(key, out, self.misc["msides"], "nResident_side")
-                side.append(r)
-            elif "nResident_node" in out[0][key].dims:
-                r = self.combine_(key, out, self.misc["mnodes"], "nResident_node")
-                node.append(r)
-            elif "nResident_elem" in out[0][key].dims:
-                r = self.combine_(key, out, self.misc["melems"], "nResident_elem")
-                el.append(r)
-            elif len(out[0][key].dims) == 1:
-                one.append(out[0][key])
-
-        side = xr.merge(side).rename({"nResident_side": "side"})
-        el = xr.merge(el).rename({"nResident_elem": "elem"})
-        node = xr.merge(node).rename({"nResident_node": "node"})
-        one = xr.merge(one).rename({"one": "one_new", "it": "iths"})
-
-        # merge
-        xdat = xr.merge([side, el, node, one])
-
-        hfile = "hotstart_it={}.nc".format(xdat.iths.values[0])
+        xdat = out[0].isel(time=it)
+        hfile = f"hotstart_it={it}.nc"
         logger.info("saving hotstart file\n")
-
-        xdat.to_netcdf(os.path.join(path, f"outputs/{hfile}"))
+        xdat.to_netcdf(os.path.join(ppath, f"outputs/{hfile}"))
 
     ## Any variable
     def combine(self, out, g2l, name):
@@ -1291,7 +1242,7 @@ class Telemac:
         varnames_n = normalize_varnames(slf.varnames)
         cube = np.zeros((len(times), len(varnames_n), len(slf.meshx)))
 
-        for it, t_ in enumerate(slf.tags["times"][:-1]):
+        for it, t_ in enumerate(slf.tags["times"]):
             # Get model results for this time step
             cube[it, :, :] = slf.get_values(it)  # This should return a 2D array of shape (n_var, nodes)
         # reindex
@@ -1420,7 +1371,7 @@ class Telemac:
         stations["gindex"] = mesh_index
         try:
             # stations["location"] = self.obs.location.values
-            stations["provider_id"] = self.obs.ioc_code.values
+            stations["provider_id"] = self.obs.location.values
             stations["provider"] = "ioc"
             stations["longitude"] = self.obs.longitude.values
             stations["latitude"] = self.obs.latitude.values

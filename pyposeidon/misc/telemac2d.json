@@ -1,9 +1,12 @@
-{
+{"params":
+    {
     "geo_file": "geo.slf",
     "cli_file": "geo.cli",
     "out_2D_file": "results_2D.slf",
     "out_1D_file": "results_1D.slf",
     "inp_wind_file": "input_wind.slf",
+    "hotstart": true,
+    "restart_file": "restart_2D.slf",
     "title": "TELEMAC 2D Model",
     "tstep_graph": 12,
     "tstep_list": 6,
@@ -14,6 +17,7 @@
     "mass_balance": true,
     "no_tracers": 1,
     "computation_continued": false,
+    "previous_computation_file": "placeholder.slf",
     "initial_conditions": "ZERO ELEVATION",
     "spherical_coords": true,
     "spatial_proj": 3,
@@ -53,7 +57,7 @@
     "discretizations_space": "11;11",
     "surface_gradient_compatibility": 0.5,
     "initial_guess_u": 2,
-    "initial_guess_h": 1,
+    "initial_guess_h": 2,
     "implicitation_depth": 0.9,
     "implicitation_velocity": 0.9,
     "tide_generating_force": false,
@@ -73,4 +77,5 @@
     "source_y": 232753,
     "source_flow": 1,
     "tracer_values": 1000000
+    }
 }

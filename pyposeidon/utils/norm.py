@@ -4,7 +4,7 @@ import pandas as pd
 # to be used for name normalization
 LONGITUDE_NAMES = {"longitude", "lon", "x", "Lon", "LONGITUDE", "LON", "X", "SCHISM_hgrid_node_x"}
 LATITUDE_NAMES = {"latitude", "lat", "y", "Lat", "LATITUDE", "LAT", "Y", "SCHISM_hgrid_node_y"}
-LOCATION_NAMES = {"location", "loc", "LOCATION", "Station_Name", "Station", "ioc_code"}
+LOCATION_NAMES = {"location", "loc", "LOCATION", "Station_Name", "Station", "ioc_code", "provider_id"}
 
 TEL_MAP_LONG = {
     "VELOCITY U      ": "u-current-velocity",
