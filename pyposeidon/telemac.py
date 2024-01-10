@@ -230,8 +230,10 @@ def ds_to_slf(ds, outpath, corrections, global_=True):
     return slf
 
 
-def write_meteo(outpath, ds, gtype="grid"):
+def write_meteo(outpath, geo, ds, gtype="grid", ttype="time", convert360=False):
     lon = ds.longitude.values
+    if convert360:
+        lon[lon > 180] = lon[lon > 180] - 360
     lat = ds.latitude.values
     #
     vars = list(ds.keys())
@@ -341,10 +343,10 @@ def write_meteo(outpath, ds, gtype="grid"):
     atm.nvar = atm.nbv1
     atm.varindex = range(atm.nvar)
 
-    if gtype == "grid":
+    if ttype == "time":
         t0 = pd.Timestamp(ds.time.values[0])
         seconds = (pd.DatetimeIndex(ds.time.values) - t0).total_seconds()
-    else:
+    elif ttype == "step":
         t0 = pd.Timestamp(ds.time.values)
         seconds = ds.step.values / 1e9
     atm.datetime = [t0.year, t0.month, t0.day, t0.hour, t0.minute, t0.second, 0]
@@ -355,13 +357,16 @@ def write_meteo(outpath, ds, gtype="grid"):
     # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
     # ~~~~ writes ATM core ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     atm.tags["times"] = seconds
+    pbar = ProgressBar(len(seconds))
     for itime in range(len(seconds)):
         # special cases ?
+        pbar.update(itime)
         atm.append_core_time_slf(itime)
         for var in var_used:
             data = np.ravel(np.transpose(ds[var][itime].values))
             atm.append_core_vars_slf([data])
     atm.fole["hook"].close()
+    pbar.finish()
 
     # interpolate on geo mesh
     generate_atm(geo, tmpFile, outpath, None)
