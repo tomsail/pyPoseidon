@@ -635,6 +635,12 @@ class Telemac:
         if hotstart:
             self.hotstart = pd.to_datetime(hotstart)
 
+        # specific to meteo grib files
+        self.gtype = get_value(self, kwargs, "meteo_gtype", "grid")
+        self.ttype = get_value(self, kwargs, "meteo_ttype", "time")
+        # convert -180/180 to 0-360
+        self.convert360 = get_value(self, kwargs, "meteo_convert360", False)
+
         for attr, value in kwargs.items():
             if not hasattr(self, attr):
                 setattr(self, attr, value)
@@ -942,7 +948,9 @@ class Telemac:
             # # WRITE METEO FILE
             logger.info("saving meteo file.. ")
             meteo = os.path.join(path, "input_wind.slf")
-            self.atm = write_meteo(meteo, geo, self.meteo.Dataset)
+            self.atm = write_meteo(
+                meteo, geo, self.meteo.Dataset, gtype=self.gtype, ttype=self.ttype, convert360=self.convert360
+            )
 
             # WRITE BOUNDARY FILE
             logger.info("saving boundary file.. ")
