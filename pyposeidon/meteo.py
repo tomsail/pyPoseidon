@@ -184,6 +184,10 @@ def cfgrib(
             v10 = data.v10[~mask_]
         data = xr.merge([msl, u10, v10])
 
+    convert360 = kwargs.get("convert360", False)
+    if convert360:
+        lon_min, lon_max = 0, 360
+
     if not lon_min:
         lon_min = data.longitude.data.min()
     if not lon_max:
@@ -441,7 +445,15 @@ def netcdf(
         }
     )
 
-    data = data.sel(longitude=slice(lon_min, lon_max)).sel(latitude=slice(lat_min, lat_max))
+    convert360 = kwargs.get("convert360", False)
+    if convert360:
+        lon_min, lon_max = 0, 360
+
+    descending_lats = data.latitude.values[0] > data.latitude.values[1]
+    if descending_lats:
+        data = data.sel(longitude=slice(lon_min, lon_max), latitude=slice(lat_max, lat_min))
+    else:
+        data = data.sel(longitude=slice(lon_min, lon_max), latitude=slice(lat_min, lat_max))
 
     try:
         data = data.sel(time=slice(start_date, end_date))
