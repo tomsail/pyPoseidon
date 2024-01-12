@@ -9,6 +9,7 @@
     "restart_file": "restart_2D.slf",
     "restart_tstep": -1,
     "title": "TELEMAC 2D Model",
+    "ncsize": 1,
     "tstep_graph": 12,
     "tstep_list": 6,
     "tstep": 300,

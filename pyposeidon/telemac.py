@@ -638,6 +638,7 @@ class Telemac:
         # specific to meteo grib files
         self.gtype = get_value(self, kwargs, "meteo_gtype", "grid")
         self.ttype = get_value(self, kwargs, "meteo_ttype", "time")
+        self.ncsize = get_value(self, kwargs, "ncsize", 1)
         # convert -180/180 to 0-360
         self.convert360 = get_value(self, kwargs, "meteo_convert360", False)
 
@@ -696,6 +697,7 @@ class Telemac:
         params["nb_tsteps"] = int(duration / tstep)
         params["tstep_graph"] = int(3600 / tstep)
         params["tstep_list"] = int(3600 / tstep)
+        params["ncsize"] = self.ncsize
 
         # tide
         if self.tide:

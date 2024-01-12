@@ -13,6 +13,7 @@ RESULTS FILE =  '{{out_2D_file}}'
 BINARY ATMOSPHERIC DATA FILE = 
 '{{inp_wind_file}}'
 /CHECKING THE MESH = YES
+PARALLEL PROCESSORS = {{ ncsize }}
 /
 /----------------------------------------------
 /  GENERAL INFORMATIONS - OUTPUTS
