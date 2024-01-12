@@ -721,7 +721,8 @@ def make_oceanmesh_global(df, **kwargs):
         x, y = to_stereo(p[0, :], p[1, :])
         pfix = np.asarray([x, y]).T
     else:
-        pfix = None
+        pfix = np.array([])
+        pfix = pfix.reshape(-1, 2)
     #
     if interpolate:  # coastlines
         df = gset(df, **kwargs)
