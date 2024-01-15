@@ -48,6 +48,7 @@ from pyposeidon.utils.norm import normalize_varnames
 from pyposeidon.utils.obs import get_obs_data
 
 # telemac (needs telemac stack on conda)
+from data_manip.extraction.telemac_file import TelemacFile
 from telapy.api.t2d import Telemac2d
 from telapy.api.t3d import Telemac3d
 from telapy.api.art import Artemis
@@ -131,21 +132,21 @@ def contains_pole(x, y):
     return np.any(y == 90, axis=0)
 
 
-def reverse_CCW(slf, corrections):
+def fix_glob_connectivity(x, y, ikle2, corrections):
     # Assuming slf.meshx, slf.meshy, and slf.ikle2 are NumPy arrays
-    ikle2 = np.array(slf.ikle2)
+    ikle2 = np.array(ikle2)
     # Ensure all triangles are CCW
-    ccw_mask = is_ccw(ikle2, slf.meshx, slf.meshy)
+    ccw_mask = is_ccw(ikle2, x, y)
     ikle2[~ccw_mask] = flip(ikle2[~ccw_mask])
 
     # triangles accross the dateline
-    m_ = is_overlapping(ikle2, slf.meshx)
+    m_ = is_overlapping(ikle2, x)
     ikle2[m_] = flip(ikle2[m_])
     # Check for negative determinant
-    detmask = get_det_mask(ikle2, slf.meshx, slf.meshy)
+    detmask = get_det_mask(ikle2, x, y)
 
     # special case : pole triangles
-    pole_mask = contains_pole(slf.meshx[ikle2].T, slf.meshy[ikle2].T)
+    pole_mask = contains_pole(x[ikle2].T, y[ikle2].T)
 
     # manual additional corrections
     if corrections is not None:
@@ -168,66 +169,34 @@ def write_netcdf(ds, outpath):
 def ds_to_slf(ds, outpath, corrections, global_=True):
     X = ds.SCHISM_hgrid_node_x.data
     Y = ds.SCHISM_hgrid_node_y.data
+    # depth
     Z = ds.depth.data
     nan_mask = np.isnan(Z)
     inf_mask = np.isinf(Z)
-
     if np.any(nan_mask) or np.any(inf_mask):
         Z[nan_mask] = 0
         Z[inf_mask] = 0
         logger.info("Z contains . Cleaning needed.")
+    # connectivity
     IKLE2 = ds.SCHISM_hgrid_face_nodes.data
 
-    # ~~> empty Selafin
-    slf = Selafin("")
-    slf.datetime = []
+    if os.path.exists(outpath):
+        os.remove(outpath)
 
-    # ~~> variables
-    slf.title = ""
-    slf.nbv1 = 1
-    slf.nvar = slf.nbv1
-    slf.varindex = range(slf.nvar)
-    slf.varnames = ["BOTTOM          "]
-    slf.varunits = ["M               "]
-
-    # ~~> variables
-    slf.npoin2 = len(X)
-    slf.meshx = np.array(X)
-    slf.meshy = np.array(Y)
-    slf.meshz = np.array(Z)
-    # ~~> tri/elements
-    slf.ikle2 = np.array(IKLE2)
     if global_:
         # adjust triangles orientation on the dateline
-        slf.ikle2 = reverse_CCW(slf, corrections)
-    slf.nelem2 = len(slf.ikle2)
-    # ~~> sizes
-    slf.ndp3 = 3
-    slf.ndp2 = 3
-    slf.nplan = 1
-    slf.nelem3 = slf.nelem2
-    slf.npoin3 = slf.npoin2
-    slf.ikle3 = slf.ikle2
-    slf.iparam = [0, 0, 0, 0, 0, 0, 1, 0, 0, 0]
-    slf.ipob3 = np.ones(slf.npoin3, dtype=np.int64)
-    slf.ipob2 = slf.ipob3
-    slf.tags["times"] = [0]
+        # and also suppress the pole triangles (for now)
+        IKLE2 = fix_glob_connectivity(X, Y, IKLE2, corrections)
 
-    # ~~> new SELAFIN writer
-    slf.fole = {}
-    slf.fole.update({"hook": open(outpath, "wb")})
-    slf.fole.update({"name": outpath})
-    slf.fole.update({"endian": ">"})  # big endian
-    slf.fole.update({"float": ("f", 4)})  # single precision
-
-    print("     +> Write SELAFIN header")
-    slf.append_header_slf()
-
-    print("     +> Write SELAFIN core")
-    slf.append_core_time_slf(0.0)
-    slf.append_core_vars_slf([slf.meshz])
-    slf.fole["hook"].close()
-    return slf
+    res = TelemacFile(outpath, access="w")
+    res.add_header("pyposeidon generated mesh", date=[1986, 2, 21, 0, 0, 0])
+    res.add_mesh(X, Y, IKLE2)
+    # add BOTTOM variable
+    res.add_variable("BOTTOM", "M")
+    res._values[0, 0, :] = Z
+    res.write()
+    res.close()
+    return res
 
 
 def write_meteo(outpath, geo, ds, gtype="grid", ttype="time", convert360=False):
@@ -630,10 +599,12 @@ class Telemac:
         self.monitor = kwargs.get("monitor", False)
 
         self.solver_name = TELEMAC_NAME
-        # hotstart
-        hotstart = get_value(self, kwargs, "hotstart", None)
-        if hotstart:
-            self.hotstart = pd.to_datetime(hotstart)
+        # restart
+        restart = get_value(self, kwargs, "hotstart", None)
+        if restart:
+            self.restart = pd.to_datetime(restart)
+        else:
+            self.restart = None
 
         # specific to meteo grib files
         self.gtype = get_value(self, kwargs, "meteo_gtype", "grid")
@@ -705,8 +676,8 @@ class Telemac:
             params["initial_conditions"] = "TPXO SATELLITE ALTIMETRY"
 
         # hotstart
-        if self.hotstart:
-            hotout = int((self.hotstart - self.rdate).total_seconds() / (params["tstep"] * params["tstep_graph"]))
+        if self.restart is not None:
+            hotout = int((self.restart - self.rdate).total_seconds() / (params["tstep"] * params["tstep_graph"]))
             params["hotstart"] = True
             params["restart_tstep"] = hotout + 1
 

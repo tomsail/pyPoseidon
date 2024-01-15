@@ -89,7 +89,6 @@ def check_mesh(ds, stereo_to_ll=False):
     """
     logger.info("checking mesh..\n")
 
-    print(ds)
     tris = ds.SCHISM_hgrid_face_nodes.data
     x = ds.SCHISM_hgrid_node_x.data
     y = ds.SCHISM_hgrid_node_y.data
