@@ -495,10 +495,6 @@ def make_oceanmesh(df, **kwargs):
                 )
         edge_length = om.compute_minimum(h_funs)
         edge_length = om.enforce_mesh_gradation(edge_length, gradation=grad)
-        if plot:
-            fig, ax, pc = edge_length.plot(holding=True, plot_colorbar=True)
-            shoreline.plot(ax=ax)
-            plt.show()
     else:
         dh = xr.open_dataset(bgmesh)
         #
@@ -536,6 +532,9 @@ def make_oceanmesh(df, **kwargs):
         edge_length.build_interpolant()
         edge_length = om.enforce_mesh_gradation(edge_length, gradation=grad)
 
+    if plot:
+        fig, ax, pc = edge_length.plot(holding=True, plot_colorbar=True)
+        shoreline.plot(ax=ax)
     logger.info("oceanmesh: generate mesh")
     points, cells = om.generate_mesh(domain, edge_length, max_iter=iter, pfix=pfix)
 
