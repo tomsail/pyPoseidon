@@ -185,8 +185,6 @@ def cfgrib(
         data = xr.merge([msl, u10, v10])
 
     convert360 = kwargs.get("convert360", False)
-    if convert360:
-        lon_min, lon_max = 0, 360
 
     if not lon_min:
         lon_min = data.longitude.data.min()
