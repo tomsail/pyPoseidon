@@ -432,6 +432,9 @@ def make_oceanmesh(df, **kwargs):
     grad = kwargs.get("gradiation", 0.11)
     iter = kwargs.get("iterations", 50)
     pfix = kwargs.get("pfix", None)
+    alpha_slp = kwargs.get("alpha_slope", 30)
+    alpha_wl = kwargs.get("alpha_wavelength", 30)
+    plot = kwargs.get("plot", False)
     #
     if interpolate:  # coastlines
         df = gset(df, **kwargs)
@@ -476,7 +479,7 @@ def make_oceanmesh(df, **kwargs):
             logger.info("oceanmesh: WL size function")
             h_funs.append(
                 om.wavelength_sizing_function(
-                    dem, wl=100, period=12.42 * 3600, min_edgelength=res_min, max_edge_length=res_max, crs=crs
+                    dem, wl=alpha_wl, period=12.42 * 3600, min_edgelength=res_min, max_edge_length=res_max, crs=crs
                 )  # use the M2-tide period (in seconds)
             )
             if bathy_gradient:
@@ -484,7 +487,7 @@ def make_oceanmesh(df, **kwargs):
                 h_funs.append(
                     om.bathymetric_gradient_sizing_function(
                         dem,
-                        slope_parameter=30.0,
+                        slope_parameter=alpha_slp,
                         min_edge_length=res_min,
                         max_edge_length=res_max,
                         crs=crs,
@@ -492,6 +495,10 @@ def make_oceanmesh(df, **kwargs):
                 )
         edge_length = om.compute_minimum(h_funs)
         edge_length = om.enforce_mesh_gradation(edge_length, gradation=grad)
+        if plot:
+            fig, ax, pc = edge_length.plot(holding=True, plot_colorbar=True)
+            shoreline.plot(ax=ax)
+            plt.show()
     else:
         dh = xr.open_dataset(bgmesh)
         #
@@ -704,6 +711,9 @@ def make_oceanmesh_global(df, **kwargs):
     grad = kwargs.get("gradiation", 0.11)
     iter = kwargs.get("iterations", 50)
     tg_database = kwargs.get("obs", None)
+    alpha_slp = kwargs.get("alpha_slope", 30)
+    alpha_wl = kwargs.get("alpha_wavelength", 30)
+    plot = kwargs.get("plot", False)
 
     # add fixed points in the mesh (stations gauges)
     if tg_database:
@@ -761,7 +771,7 @@ def make_oceanmesh_global(df, **kwargs):
             logger.info("oceanmesh: WL size function")
             h_funs.append(
                 om.wavelength_sizing_function(
-                    dem, wl=100, period=12.42 * 3600, min_edgelength=res_min, max_edge_length=res_max, crs=crs
+                    dem, wl=alpha_wl, period=12.42 * 3600, min_edgelength=res_min, max_edge_length=res_max, crs=crs
                 )  # use the M2-tide period (in seconds)
             )
             if bathy_gradient:
@@ -769,7 +779,7 @@ def make_oceanmesh_global(df, **kwargs):
                 h_funs.append(
                     om.bathymetric_gradient_sizing_function(
                         dem,
-                        slope_parameter=30.0,
+                        slope_parameter=alpha_slp,
                         min_edge_length=res_min,
                         max_edge_length=res_max,
                         crs=crs,
@@ -777,6 +787,10 @@ def make_oceanmesh_global(df, **kwargs):
                 )
         edge_length = om.compute_minimum(h_funs)
         edge_length = om.enforce_mesh_gradation(edge_length, gradation=grad, stereo=True)
+        if plot:
+            fig, ax, pc = edge_length.plot(holding=True, plot_colorbar=True)
+            shoreline.plot(ax=ax)
+            plt.show()
         # stereo shoreline
         shoreline_stereo = om.Shoreline(shp=fshp_ste, bbox=extent.bbox, h0=res_min, crs=crs, stereo=True)
         domain = om.signed_distance_function(shoreline_stereo)
