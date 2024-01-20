@@ -184,8 +184,6 @@ def cfgrib(
             v10 = data.v10[~mask_]
         data = xr.merge([msl, u10, v10])
 
-    convert360 = kwargs.get("convert360", False)
-
     if not lon_min:
         lon_min = data.longitude.data.min()
     if not lon_max:
@@ -443,8 +441,8 @@ def netcdf(
         }
     )
 
-    convert360 = kwargs.get("convert360", False)
-    if convert360:
+    input360 = kwargs.get("input360", False)
+    if input360:
         lon_min, lon_max = 0, 360
 
     descending_lats = data.latitude.values[0] > data.latitude.values[1]
@@ -457,9 +455,10 @@ def netcdf(
         data = data.sel(time=slice(start_date, end_date))
     except:
         data = data.sel(time=slice(start_date, start_date + pd.to_timedelta(time_frame)))
-
-    s, f, i = meteo_irange
-    data = data.isel(time=slice(s, f, i))
+    if input360:
+        lons = data.longitude.values
+        lons[lons >= 180] = lons[lons >= 180] - 360
+        data = data.assign_coords({"longitude": lons})
 
     # ---------------------------------------------------------------------
     logger.info("meteo done\n")

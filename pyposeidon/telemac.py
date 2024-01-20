@@ -43,6 +43,7 @@ from pyposeidon.utils.get_value import get_value
 from pyposeidon.utils.converter import myconverter
 from pyposeidon.utils.cpoint import closest_node
 from pyposeidon.utils import data
+from pyposeidon.utils.seam import get_seam
 from pyposeidon.utils.norm import normalize_column_names
 from pyposeidon.utils.norm import normalize_varnames
 from pyposeidon.utils.obs import get_obs_data
@@ -167,6 +168,9 @@ def write_netcdf(ds, outpath):
 
 
 def ds_to_slf(ds, outpath, corrections, global_=True):
+    now = pd.Timestamp.now()
+    _date = [now.year, now.month, now.day, now.hour, now.minute, 0]
+
     X = ds.SCHISM_hgrid_node_x.data
     Y = ds.SCHISM_hgrid_node_y.data
     # depth
@@ -199,118 +203,51 @@ def ds_to_slf(ds, outpath, corrections, global_=True):
     return res
 
 
-def write_meteo(outpath, geo, ds, gtype="grid", ttype="time", convert360=False):
+def write_meteo(outpath, geo, ds, gtype="grid", ttype="time", input360=False):
     lon = ds.longitude.values
-    if convert360:
-        lon[lon > 180] = lon[lon > 180] - 360
+    if input360:
+        lon[lon < -180] += 360
     lat = ds.latitude.values
     #
     vars = list(ds.keys())
     var_used = []
-    atm = Selafin("")
-    atm.fole = {}
+
     tmpFile = os.path.splitext(outpath)[0] + "_tmp.slf"
-    atm.fole.update({"hook": open(tmpFile, "wb")})
-    atm.fole.update({"name": tmpFile})
-    atm.fole.update({"endian": ">"})  # big endian
-    atm.fole.update({"float": ("f", 4)})  # single precision
 
-    # Meta data and variable names
-    atm.title = ""
-    atm.varnames = []
-    atm.varunits = []
-    if "u10" in vars:
-        atm.varnames.append("WIND VELOCITY U ")
-        atm.varunits.append("M/S             ")
-        var_used.append("u10")
-    if "v10" in vars:
-        atm.varnames.append("WIND VELOCITY V ")
-        atm.varunits.append("M/S             ")
-        var_used.append("v10")
-    if "msl" in vars:
-        atm.varnames.append("SURFACE PRESSURE")
-        atm.varunits.append("UI              ")
-        var_used.append("msl")
-    if "tmp " in vars:
-        atm.varnames.append("AIR TEMPERATURE ")
-        atm.varunits.append("DEGREES         ")
-        var_used.append("tmp")
-    if not atm.varnames:
-        raise ValueError("There are no meteorological variables to convert!")
-    atm.nbv1 = len(atm.varnames)
-    atm.nvar = atm.nbv1
-    atm.varindex = range(atm.nvar)
+    if os.path.exists(tmpFile):
+        os.remove(tmpFile)
 
-    print("   +> setting connectivity")
+    atm = TelemacFile(tmpFile, access="w")
+
     if gtype == "grid":
-        # Sizes and mesh connectivity
-        atm.nplan = 1  # it should be 2d but why the heack not ...
-        atm.nx1d = len(lon)
-        atm.ny1d = len(lat)
-        atm.meshx = np.tile(lon, atm.ny1d).reshape(atm.ny1d, atm.nx1d).T.ravel()
-        atm.meshy = np.tile(lat, atm.nx1d)
-        atm.ndp2 = 3
-        atm.ndp3 = atm.ndp2
-        atm.npoin2 = atm.nx1d * atm.ny1d
-        atm.npoin3 = atm.npoin2
-        atm.nelem2 = 2 * (atm.nx1d - 1) * (atm.ny1d - 1)
-        atm.nelem3 = atm.nelem2
+        nx1d = len(lon)
+        ny1d = len(lat)
+        x = np.tile(lon, ny1d).reshape(ny1d, nx1d).T.ravel()
+        y = np.tile(lat, nx1d)
+        nelem2 = 2 * (nx1d - 1) * (ny1d - 1)
         # set geometry
-        atm.ikle3 = np.zeros((atm.nelem2, atm.ndp3), dtype=int)
+        ikle3 = np.zeros((nelem2, 3), dtype=np.int32)
         ielem = 0
-        for i in range(1, atm.nx1d):
-            for j in range(1, atm.ny1d):
-                ipoin = (i - 1) * atm.ny1d + j - 1
+        for i in range(1, nx1d):
+            for j in range(1, ny1d):
+                ipoin = (i - 1) * ny1d + j - 1
                 # ~~> first triangle
-                atm.ikle3[ielem][0] = ipoin
-                atm.ikle3[ielem][1] = ipoin + atm.ny1d
-                atm.ikle3[ielem][2] = ipoin + 1
+                ikle3[ielem][0] = ipoin
+                ikle3[ielem][1] = ipoin + ny1d
+                ikle3[ielem][2] = ipoin + 1
                 ielem += 1
                 # ~~> second triangle
-                atm.ikle3[ielem][0] = ipoin + atm.ny1d
-                atm.ikle3[ielem][1] = ipoin + atm.ny1d + 1
-                atm.ikle3[ielem][2] = ipoin + 1
+                ikle3[ielem][0] = ipoin + ny1d
+                ikle3[ielem][1] = ipoin + ny1d + 1
+                ikle3[ielem][2] = ipoin + 1
                 ielem += 1
-        # Boundaries
-        atm.ipob3 = np.zeros(atm.npoin3, dtype=int)
-        # along the x-axis (lon)
-        for i in range(atm.nx1d):
-            ipoin = i * atm.ny1d
-            atm.ipob3[ipoin] = i + 1
-            ipoin = i * atm.ny1d - 1
-            atm.ipob3[ipoin] = 2 * atm.nx1d + (atm.ny1d - 2) - i
-        # along the y-axis (lat)
-        for i in range(1, atm.ny1d):
-            ipoin = i
-            atm.ipob3[ipoin] = 2 * atm.nx1d + 2 * (atm.ny1d - 2) - i + 1
-            ipoin = atm.ny1d * (atm.nx1d - 1) + i
-            atm.ipob3[ipoin] = atm.nx1d + i
-        atm.ipob2 = atm.ipob3
-        # Boundary points
-        atm.iparam = [0, 0, 0, 0, 0, 0, 0, np.count_nonzero(atm.ipob2), 0, 1]
-
     else:
-        atm.nplan = 1  # it should be 2d but why the heack not ...
-        atm.meshx = lon
-        atm.meshy = lat
-        atm.nx1d = len(lon)
-        atm.ny1d = len(lat)
-        atm.ndp2 = 3
-        atm.ndp3 = atm.ndp2
-        atm.npoin2 = len(lon)
-        atm.npoin3 = atm.npoin2
+        x = lon
+        y = lat
         tri = Delaunay(np.column_stack((lon, lat)))
-        atm.nelem2 = len(tri.simplices)
-        atm.nelem3 = atm.nelem2
-        atm.ikle3 = tri.simplices
-        # Boundaries
-        atm.ipob3 = np.zeros(atm.npoin3, dtype=int)
-        atm.iparam = [0, 0, 0, 0, 0, 0, 0, np.count_nonzero(atm.ipob2), 0, 1]
+        ikle3 = tri.simplices
 
-    print("   +> writing header")
-    atm.nbv1 = len(atm.varnames)
-    atm.nvar = atm.nbv1
-    atm.varindex = range(atm.nvar)
+    atm.add_mesh(x, y, ikle3)
 
     if ttype == "time":
         t0 = pd.Timestamp(ds.time.values[0])
@@ -318,24 +255,34 @@ def write_meteo(outpath, geo, ds, gtype="grid", ttype="time", convert360=False):
     elif ttype == "step":
         t0 = pd.Timestamp(ds.time.values)
         seconds = ds.step.values / 1e9
-    atm.datetime = [t0.year, t0.month, t0.day, t0.hour, t0.minute, t0.second, 0]
+    datetime = [t0.year, t0.month, t0.day, t0.hour, t0.minute, t0.second, 0]
+    atm.add_header("pyposeidon generated mesh", date=datetime)
 
-    atm.append_header_slf()
+    # Meta data and variable names
+    if "u10" in vars:
+        atm.add_variable("WIND VELOCITY U", "M/S")
+        var_used.append("u10")
+    if "v10" in vars:
+        atm.add_variable("WIND VELOCITY V", "M/S")
+        var_used.append("v10")
+    if "msl" in vars:
+        atm.add_variable("SURFACE PRESSURE", "UI")
+        var_used.append("msl")
+    if "tmp " in vars:
+        atm.add_variable("AIR TEMPERATURE ", "DEGREES")
+        var_used.append("tmp")
+    if not atm.varnames:
+        raise ValueError("There are no meteorological variables to convert!")
 
-    print("     +> Write Selafin core")
-    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-    # ~~~~ writes ATM core ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    atm.tags["times"] = seconds
     pbar = ProgressBar(len(seconds))
-    for itime in range(len(seconds)):
-        # special cases ?
+    for itime, t_ in enumerate(seconds):
         pbar.update(itime)
-        atm.append_core_time_slf(itime)
-        for var in var_used:
-            data = np.ravel(np.transpose(ds[var][itime].values))
-            atm.append_core_vars_slf([data])
-    atm.fole["hook"].close()
-    pbar.finish()
+        atm.add_time_step(t_)
+        for var_ds, var_tel in zip(var_used, atm.varnames):
+            data = np.ravel(np.transpose(ds[var_ds][itime].values))
+            atm.add_data_value(var_tel, itime, data)
+    atm.write()
+    atm.close()
 
     # interpolate on geo mesh
     generate_atm(geo, tmpFile, outpath, None)
@@ -611,7 +558,7 @@ class Telemac:
         self.ttype = get_value(self, kwargs, "meteo_ttype", "time")
         self.ncsize = get_value(self, kwargs, "ncsize", 1)
         # convert -180/180 to 0-360
-        self.convert360 = get_value(self, kwargs, "meteo_convert360", False)
+        self.input360 = get_value(self, kwargs, "meteo_input360", False)
 
         for attr, value in kwargs.items():
             if not hasattr(self, attr):
@@ -922,7 +869,7 @@ class Telemac:
             logger.info("saving meteo file.. ")
             meteo = os.path.join(path, "input_wind.slf")
             self.atm = write_meteo(
-                meteo, geo, self.meteo.Dataset, gtype=self.gtype, ttype=self.ttype, convert360=self.convert360
+                meteo, geo, self.meteo.Dataset, gtype=self.gtype, ttype=self.ttype, input360=self.input360
             )
 
             # WRITE BOUNDARY FILE
