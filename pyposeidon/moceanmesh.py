@@ -532,6 +532,7 @@ def make_oceanmesh(df, **kwargs):
         edge_length.build_interpolant()
         edge_length = om.enforce_mesh_gradation(edge_length, gradation=grad)
 
+    edge_length.values = np.abs(edge_length.values)
     if plot:
         fig, ax, pc = edge_length.plot(holding=True, plot_colorbar=True)
         shoreline.plot(ax=ax)
@@ -785,11 +786,15 @@ def make_oceanmesh_global(df, **kwargs):
                     )
                 )
         edge_length = om.compute_minimum(h_funs)
-        edge_length = om.enforce_mesh_gradation(edge_length, gradation=grad, stereo=True)
         if plot:
             fig, ax, pc = edge_length.plot(holding=True, plot_colorbar=True)
             shoreline.plot(ax=ax)
-            plt.show()
+        edge_length = om.enforce_mesh_gradation(edge_length, gradation=grad, stereo=False)
+        edge_length.values = np.abs(edge_length.values)
+        if plot:
+            fig, ax, pc = edge_length.plot(holding=True, plot_colorbar=True)
+            shoreline.plot(ax=ax)
+
         # stereo shoreline
         shoreline_stereo = om.Shoreline(shp=fshp_ste, bbox=extent.bbox, h0=res_min, crs=crs, stereo=True)
         domain = om.signed_distance_function(shoreline_stereo)
