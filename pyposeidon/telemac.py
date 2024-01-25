@@ -143,8 +143,6 @@ def fix_glob_connectivity(x, y, ikle2, corrections):
     # triangles accross the dateline
     m_ = is_overlapping(ikle2, x)
     ikle2[m_] = flip(ikle2[m_])
-    # Check for negative determinant
-    detmask = get_det_mask(ikle2, x, y)
 
     # special case : pole triangles
     pole_mask = contains_pole(x[ikle2].T, y[ikle2].T)
@@ -156,9 +154,11 @@ def fix_glob_connectivity(x, y, ikle2, corrections):
         for rem in corrections["remove"]:
             pole_mask[rem] = True
 
-    print(f"reversed {m_.sum()} triangles")
-    print(f"pole triangles: {np.where(pole_mask)[0]}")
-    print("[TEMPORARY FIX]: REMOVE THE POLE TRIANGLES")
+    # Check for negative determinant
+    detmask = ~get_det_mask(ikle2, x, y)
+    logger.debug(f"reversed {detmask.sum()} triangles")
+    logger.debug(f"pole triangles: {np.where(pole_mask)[0]}")
+    logger.debug("[TEMPORARY FIX]: REMOVE THE POLE TRIANGLES")
     return ikle2[~pole_mask, :]
 
 
@@ -842,7 +842,7 @@ class Telemac:
         path = get_value(self, kwargs, "rpath", "./telemac/")
         flag = get_value(self, kwargs, "update", ["all"])
         split_by = get_value(self, kwargs, "meteo_split_by", None)
-        corrections = get_value(self, kwargs, "mesh_corrections", None)
+        corrections = get_value(self, kwargs, "mesh_corrections", {"reverse": [], "remove": []})
 
         if not os.path.exists(path):
             os.makedirs(path)
