@@ -13,7 +13,7 @@ RESULTS FILE =  '{{out_2D_file}}'
 BINARY ATMOSPHERIC DATA FILE = 
 '{{inp_wind_file}}'
 /CHECKING THE MESH = YES
-PARALLEL PROCESSORS = {{ ncsize }}
+/PARALLEL PROCESSORS = {{ ncsize }}
 /
 /----------------------------------------------
 /  GENERAL INFORMATIONS - OUTPUTS
@@ -54,7 +54,7 @@ INITIAL CONDITIONS  = '{{initial_conditions}}'     /ZERO ELEVATION,
 {% if hotstart %}
 RESTART MODE = YES
 RESTART FILE = {{ restart_file }}
-RECORD NUMBER IN RESTART FILE = {{ restart_tstep }}
+/RECORD NUMBER IN RESTART FILE = {{ restart_tstep }}
 RESTART FILE FORMAT = 'SERAFIND' {% endif %}
 /
 /---------------------------------------------------------------------

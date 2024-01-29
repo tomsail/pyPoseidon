@@ -6,6 +6,7 @@ import xarray as xr
 import numpy as np
 from tqdm.auto import tqdm
 import glob
+import numcodecs
 
 import pyposeidon
 from pyposeidon.utils import data
@@ -48,6 +49,53 @@ def get_encoding(ename):
     return {
         ename: {"zlib": True, "complevel": 1},
     }
+
+
+def export_xarray(ds, filename_out, chunk=None):
+    """
+    Export an xarray dataset to netcdf or zarr format.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        The xarray dataset to export.
+    filename_out : str
+        The path and filename of the output file.
+    chunk : dict, optional
+        The chunk size to use when saving the dataset to zarr format, by default None.
+        example: chunk = {'nodes': 1000, 'time': 100}
+
+    Returns
+    -------
+    None
+
+    Raises
+    ------
+    ValueError
+        If the filename does not have a .nc or .zarr extension.
+    """
+    if not filename_out.endswith(".nc") and not filename_out.endswith(".zarr"):
+        raise ValueError("Invalid filename extension. Must be .nc or .zarr")
+    if filename_out.endswith(".nc"):
+        encoding = {}
+        default_encoding = {"zlib": True, "complevel": 1}
+        for varname in list(ds.variables):
+            encoding[varname] = default_encoding
+            if chunk:
+                chunksizes = dict(ds[varname].sizes)
+                for key in chunk:
+                    if key in chunksizes:
+                        chunksizes[key] = chunk[key]
+                encoding[varname]["chunksizes"] = list(chunksizes.values())
+        ds.to_netcdf(filename_out, encoding=encoding)
+    elif filename_out.endswith(".zarr"):
+        compressor = numcodecs.Blosc(cname="zstd", clevel=1)
+        if chunk is not None:
+            ds = ds.chunk(chunk)
+        encoding = {}
+        for varname in list(ds.variables):
+            encoding.update({varname: {"compressor": compressor}})
+        ds.to_zarr(filename_out, encoding=encoding, consolidated=True)
 
 
 def save_leads(stations, st, start_date, dt, leads, rpath="./skill/"):

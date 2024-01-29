@@ -11,26 +11,16 @@ Schism model of pyposeidon. It controls the creation, execution & output  of a c
 import os
 import datetime
 import numpy as np
-import copy
-import xml.dom.minidom as md
-from shutil import copy2
-import subprocess
-import shlex
 import sys
 import json
-from collections import OrderedDict
 import pandas as pd
 import glob
-from shutil import copyfile
 import xarray as xr
 import geopandas as gp
 import shapely
-import f90nml
 import jinja2
-import errno
-import dask
 from searvey import ioc
-from tqdm.auto import tqdm
+import shutil
 from scipy.spatial import Delaunay
 
 # local modules
@@ -41,15 +31,14 @@ import pyposeidon.dem as pdem
 from pyposeidon.paths import DATA_PATH
 from pyposeidon.utils.get_value import get_value
 from pyposeidon.utils.converter import myconverter
-from pyposeidon.utils.cpoint import closest_node
+from pyposeidon.utils.cpoint import closest_n_points
 from pyposeidon.utils import data
-from pyposeidon.utils.seam import get_seam
 from pyposeidon.utils.norm import normalize_column_names
 from pyposeidon.utils.norm import normalize_varnames
 from pyposeidon.utils.obs import get_obs_data
+from pyposeidon.utils.post import export_xarray
 
 # telemac (needs telemac stack on conda)
-from data_manip.extraction.telemac_file import TelemacFile
 from telapy.api.t2d import Telemac2d
 from telapy.api.t3d import Telemac3d
 from telapy.api.art import Artemis
@@ -105,6 +94,19 @@ def calculate_time_step_hourly_multiple(resolution, min_water_depth=0.1, courant
 
 
 # Helper functions
+def remove(path):
+    try:
+        if os.path.isfile(path):
+            os.remove(path)  # Remove a file
+        elif os.path.isdir(path):
+            if not os.listdir(path):  # Check if the directory is empty
+                os.rmdir(path)
+            else:
+                shutil.rmtree(path)
+    except OSError as e:
+        print(f"Error: {e.strerror}")
+
+
 def is_ccw(tris, meshx, meshy):
     x1, x2, x3 = meshx[tris].T
     y1, y2, y3 = meshy[tris].T
@@ -184,8 +186,7 @@ def ds_to_slf(ds, outpath, corrections, global_=True):
     # connectivity
     IKLE2 = ds.SCHISM_hgrid_face_nodes.data
 
-    if os.path.exists(outpath):
-        os.remove(outpath)
+    remove(outpath)
 
     if global_:
         # adjust triangles orientation on the dateline
@@ -214,8 +215,7 @@ def write_meteo(outpath, geo, ds, gtype="grid", ttype="time", input360=False):
 
     tmpFile = os.path.splitext(outpath)[0] + "_tmp.slf"
 
-    if os.path.exists(tmpFile):
-        os.remove(tmpFile)
+    remove(tmpFile)
 
     atm = TelemacFile(tmpFile, access="w")
 
@@ -275,11 +275,13 @@ def write_meteo(outpath, geo, ds, gtype="grid", ttype="time", input360=False):
         raise ValueError("There are no meteorological variables to convert!")
 
     pbar = ProgressBar(len(seconds))
+    atm._times = np.array(seconds, dtype=np.float64)
+    atm._ntimestep = len(seconds)
+    atm._values = np.zeros((len(seconds), atm._nvar, atm._npoin3))
     for itime, t_ in enumerate(seconds):
         pbar.update(itime)
-        atm.add_time_step(t_)
         for var_ds, var_tel in zip(var_used, atm.varnames):
-            data = np.ravel(np.transpose(ds[var_ds][itime].values))
+            data = np.ravel(np.transpose(ds.isel(time=itime)[var_ds].values))
             atm.add_data_value(var_tel, itime, data)
     atm.write()
     atm.close()
@@ -626,7 +628,7 @@ class Telemac:
         if self.restart is not None:
             hotout = int((self.restart - self.rdate).total_seconds() / (params["tstep"] * params["tstep_graph"]))
             params["hotstart"] = True
-            params["restart_tstep"] = hotout + 1
+            params["restart_tstep"] = hotout
 
         # update
         if dic:
@@ -674,12 +676,11 @@ class Telemac:
 
             self.meteo.Dataset = xr.concat([self.meteo.Dataset, ap], dim="time")
 
-    @staticmethod
-    def to_force(ds, geo, outpath):
+    def to_force(self, geo, outpath):
         # # WRITE METEO FILE
         logger.info("saving meteo file.. ")
-        meteo = os.path.join(outpath, "input_wind.slf")
-        write_meteo(meteo, geo, ds)
+        out_file = os.path.join(outpath, "input_wind.slf")
+        write_meteo(out_file, geo, self.meteo.Dataset, gtype=self.gtype, ttype=self.ttype, input360=self.input360)
 
     # ============================================================================================
     # TPXO
@@ -1058,9 +1059,8 @@ class Telemac:
         else:
             logger.warning("no meteo loaded")
 
-    def hotstart(self, it=None, **kwargs):
-        ppath = get_value(self, kwargs, "ppath", None)
-
+    def hotstart(self, t=None, **kwargs):
+        ppath = get_value(self, kwargs, "ppath", self.rpath)
         # 1 - Generate the NetCDF hotstart file
         if self.tag == "telemac2d":
             hfiles = glob.glob(os.path.join(ppath, f"outputs/tel_out2D.nc"))
@@ -1068,8 +1068,10 @@ class Telemac:
         out = []
         for i in range(len(hfiles)):
             out.append(xr.open_dataset(hfiles[i]))
+        t_ = out[0].time.values
+        it = np.where(t_ == t)[0]
         xdat = out[0].isel(time=it)
-        hfile = f"hotstart_it={it}.nc"
+        hfile = f"hotstart_{t.strftime('%Y%m%d.%H')}.nc"
         logger.info("saving hotstart file\n")
         xdat.to_netcdf(os.path.join(ppath, f"outputs/{hfile}"))
 
@@ -1175,6 +1177,9 @@ class Telemac:
         y_units = "degrees_north"
 
         path = get_value(self, kwargs, "rpath", "./telemac/")
+        filename = get_value(self, kwargs, "filename", "stations.zarr")
+        filename2d = get_value(self, kwargs, "filename2d", "out_2D.zarr")
+        chunk = get_value(self, kwargs, "chunk", None)
 
         logger.info("get combined 2D netcdf files \n")
         # check for new IO output
@@ -1190,9 +1195,9 @@ class Telemac:
         # Normalize Time Data
         sdate = pd.to_datetime(date, utc=True, format="%Y-%m-%d %H:%M %z")
         times = pd.to_datetime(slf.tags["times"], unit="s", origin=sdate.tz_convert(None))
-        logger.info(f"Length of slf.meshx: {len(slf.meshx)}")
-        logger.info(f"Length of slf.meshy: {len(slf.meshy)}")
-        logger.info(f"Length of depth values: {len(self.mesh.Dataset.depth.values)}")
+        if isinstance(self.mesh, str):
+            if self.mesh == "tri2d" or self.mesh == "r2d":
+                self.mesh = pmesh.set(type=self.mesh, mesh_file=self.mesh_file)
         # Initialize first the xr.Dataset
         xc = xr.Dataset(
             {
@@ -1204,7 +1209,11 @@ class Telemac:
                 "id": ("bnodes", self.mesh.Dataset.id.values),
                 "depth": ("nodes", self.mesh.Dataset.depth.values),
             },
-            coords={"bnodes": np.arange(len(self.mesh.Dataset.node.values)), "time": times},
+            coords={
+                "bnodes": np.arange(len(self.mesh.Dataset.node.values)),
+                "time": times,
+                "nodes": np.arange(len(slf.meshx)),
+            },
         )
 
         # Normalize Variable Names and Add Model Results
@@ -1233,13 +1242,14 @@ class Telemac:
             "mesh": "TELEMAC_Selafin",
         }
 
-        xc.depth.attrs = {
-            "long_name": "Bathymetry",
-            "units": "meters",
-            "positive": "down",
-            "mesh": "TELEMAC_Selafin",
-            "location": "node",
-        }
+        if "depth" in xc.variables:
+            xc.depth.attrs = {
+                "long_name": "Bathymetry",
+                "units": "meters",
+                "positive": "down",
+                "mesh": "TELEMAC_Selafin",
+                "location": "node",
+            }
 
         xc.face_node_connectivity.attrs = {
             "long_name": "Horizontal Element Table",
@@ -1264,7 +1274,41 @@ class Telemac:
             "type": "TELEMAC Model output",
         }
         os.makedirs(os.path.join(path, "outputs"), exist_ok=True)
-        xc.to_netcdf(os.path.join(path, f"outputs/tel_out2D.nc"))
+        out2d = os.path.join(path, "outputs", filename2d)
+        remove(out2d)
+        export_xarray(xc, out2d, chunk=chunk)
+
+        if self.monitor:
+            logger.info("export observations nc file\n")
+            # Normalize Variable Names and Add Model Results
+            varnames_n = normalize_varnames(slf.varnames)
+            cube = np.zeros((len(times), len(varnames_n), len(self.stations_mesh_id["gindex"])))
+            if isinstance(self.stations_mesh_id, dict):
+                stations = pd.DataFrame(self.stations_mesh_id)
+            elif isinstance(self.stations_mesh_id, pd.DataFrame):
+                stations = self.stations_mesh_id
+            for it, t_ in enumerate(slf.tags["times"]):
+                # Get model results for this time step
+                data = slf.get_values(it)  # This should return a 2D array of shape (n_var, nodes)
+                for i, idx in enumerate(stations["gindex"]):
+                    idx = int(idx)
+                    for var in range(len(varnames_n)):
+                        if var >= data.shape[0]:
+                            raise IndexError(f"Variable index {var} out of bounds for data with shape {data.shape}")
+                        if idx >= data.shape[1]:
+                            raise IndexError(f"Index {idx} out of bounds for data with shape {data.shape}")
+                        cube[it, var, i] = data[var, idx]
+
+            ds = xr.Dataset(
+                {
+                    "elev": (("time", "variable", "id"), cube),  # replace with your actual data
+                },
+                coords={"time": times, "id": stations["provider_id"], "variable": varnames_n},
+            )
+
+            out_obs = os.path.join(path, "outputs", filename)
+            remove(out_obs)
+            export_xarray(ds, out_obs, chunk=chunk)
 
         logger.info("done with output netCDF files \n")
 
@@ -1294,9 +1338,7 @@ class Telemac:
         tgn = normalize_column_names(tg.copy())
 
         ##### make sure lat/lon are floats
-        tgn = tgn.astype({"latitude": float, "longitude": float})
-
-        self.obs = tgn
+        tgn = tgn.astype({"latitude": float, "longitude": float, "location": str})
 
         ## FOR TIDE GAUGE MONITORING
 
@@ -1319,16 +1361,9 @@ class Telemac:
         mesh_index = []
         for l in range(tgn.shape[0]):
             plat, plon = tgn.loc[l, ["latitude", "longitude"]]
-            cp = closest_node([plon, plat], gpoints)
-            mesh_index.append(
-                list(
-                    zip(
-                        self.mesh.Dataset.SCHISM_hgrid_node_x.values,
-                        self.mesh.Dataset.SCHISM_hgrid_node_y.values,
-                    )
-                ).index(tuple(cp))
-            )
-            stations.append(cp)
+            cp = closest_n_points([plon, plat], 1, gpoints)[0]
+            mesh_index.append(cp)
+            stations.append(gpoints[cp])
 
         if stations == []:
             logger.warning("no observations available\n")
@@ -1339,15 +1374,12 @@ class Telemac:
         stations.index += 1
         stations["gindex"] = mesh_index
         try:
-            # stations["location"] = self.obs.location.values
-            stations["provider_id"] = self.obs.location.values
+            stations["provider_id"] = tgn.location.values
             stations["provider"] = "ioc"
-            stations["longitude"] = self.obs.longitude.values
-            stations["latitude"] = self.obs.latitude.values
+            stations["longitude"] = tgn.longitude.values
+            stations["latitude"] = tgn.latitude.values
         except:
             pass
-
-        stations["gindex"] = stations["gindex"].astype(int)
 
         self.stations_mesh_id = stations
 

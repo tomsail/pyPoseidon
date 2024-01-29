@@ -495,26 +495,16 @@ class TelemacCast:
         pwd = os.getcwd()
 
         self.origin = self.model.rpath
-        self.rdate = self.model.rdate
         ppath = self.ppath
 
         ppath = os.path.realpath(ppath)
-
-        # control
-        if not isinstance(self.rdate, pd.Timestamp):
-            self.rdate = pd.to_datetime(self.rdate)
 
         if not os.path.exists(self.origin):
             sys.stdout.write(f"Initial folder not present {self.origin}\n")
             sys.exit(1)
 
         # create the new folder/run path
-        rpath = self.cpath
-
-        #    rpath = pathlib.Path(rpath).resolve()
-        #     rpath = str(rpath)
-        rpath = os.path.realpath(rpath)
-
+        rpath = os.path.realpath(self.cpath)
         if not os.path.exists(rpath):
             os.makedirs(rpath)
 
@@ -547,14 +537,17 @@ class TelemacCast:
         info["config_file"] = os.path.join(ppath, self.tag + "_model.json")
 
         # update the properties
-        info["rdate"] = self.rdate
-        info["start_date"] = self.sdate
-        info["time_frame"] = self.time_frame
-        info["end_date"] = self.sdate + pd.to_timedelta(self.time_frame)
-        info["meteo_source"] = self.meteo
+        info["params"]["rdate"] = self.sdate
+        info["params"]["start_date"] = self.sdate
+        info["params"]["time_frame"] = self.end_date - self.sdate
+        info["params"]["end_date"] = self.end_date
+        info["params"]["datestart"] = self.start.strftime("%Y;%m;%d")
+        info["params"]["timestart"] = self.sdate.strftime("%H;%M;%S")
+        info["params"]["duration"] = pd.to_timedelta(info["params"]["time_frame"]).total_seconds()
         info["rpath"] = rpath
 
         m = pm.set(**info)
+        m.rpath = rpath
         # copy/link necessary files
         if copy:
             logger.debug("Copy model files")
@@ -569,13 +562,10 @@ class TelemacCast:
         logger.debug("create restart file")
 
         # check for combine hotstart
-        hotout = int(
-            (self.sdate - self.rdate).total_seconds() / (info["params"]["tstep"] * info["params"]["tstep_graph"])
-        )
-        logger.debug("hotout_it = {}".format(hotout))
+        logger.debug(f"hotout_t = {self.sdate.strftime('%Y%m%d.%H')}")
 
         # link restart file - NetCDF
-        inresfile = os.path.join(ppath, f"outputs/hotstart_it={hotout}.nc")
+        inresfile = os.path.join(ppath, f"outputs/hotstart_{self.sdate.strftime('%Y%m%d.%H')}.nc")
         outresfile = os.path.join(rpath, "hotstart.nc")
 
         logger.debug("hotstart_file: %s", inresfile)
@@ -587,7 +577,7 @@ class TelemacCast:
                 data = pd.json_normalize(data, max_level=0)
                 ph = data.to_dict(orient="records")[0]
             p = pm.set(**ph)
-            p.hotstart(it=hotout)
+            p.hotstart(t=self.sdate, ppath=ppath)
         else:
             logger.info("Hotstart file already existing. Skipping creation.\n")
 
@@ -602,20 +592,11 @@ class TelemacCast:
 
         # get new meteo
         logger.info("process meteo\n")
-
-        flag = get_value(self, kwargs, "update", [])
-
-        if os.path.exists(info["meteo_source"]):
-            m.force(**info)
-            geo = os.path.join(rpath, "geo.slf")
-            m.to_force(m.meteo.Dataset, geo, rpath)
-        else:
-            logger.warning("meteo files present\n")
-
-        # modify param file
-        rnday_new = (self.sdate - self.rdate).total_seconds() / (3600 * 24.0) + pd.to_timedelta(
-            self.time_frame
-        ).total_seconds() / (3600 * 24.0)
+        if info["meteo_source"] is None:
+            info["meteo_source"] = self.meteo
+        m.force(**info)
+        geo = os.path.join(rpath, "geo.slf")
+        m.to_force(geo, rpath)
 
         # complete information for initial hotstart conditions
         info["params"]["computation_continued"] = True
@@ -634,3 +615,4 @@ class TelemacCast:
         logger.info("done for date : %s", self.sdate.strftime("%Y%m%d.%H"))
 
         os.chdir(pwd)
+        return m
