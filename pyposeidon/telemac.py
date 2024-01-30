@@ -1359,11 +1359,10 @@ class Telemac:
 
         stations = []
         mesh_index = []
-        for l in range(tgn.shape[0]):
-            plat, plon = tgn.loc[l, ["latitude", "longitude"]]
-            cp = closest_n_points([plon, plat], 1, gpoints)[0]
-            mesh_index.append(cp)
-            stations.append(gpoints[cp])
+        coords = np.array([tgn.longitude.values, tgn.latitude.values]).T
+        cp = closest_n_points(coords, 1, gpoints).T[0]
+        mesh_index.append(cp)
+        stations.append(gpoints[cp])
 
         if stations == []:
             logger.warning("no observations available\n")
