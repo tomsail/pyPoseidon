@@ -1064,17 +1064,13 @@ class Telemac:
             logger.warning("no meteo loaded")
 
     def hotstart(self, t=None, **kwargs):
+        filename2d = get_value(self, kwargs, "filename2d", "out_2D.zarr")
         ppath = get_value(self, kwargs, "ppath", self.rpath)
-        # 1 - Generate the NetCDF hotstart file
-        if self.tag == "telemac2d":
-            hfiles = glob.glob(os.path.join(ppath, f"outputs/tel_out2D.nc"))
-        # store them in a list
-        out = []
-        for i in range(len(hfiles)):
-            out.append(xr.open_dataset(hfiles[i]))
-        t_ = out[0].time.values
+        out2d = os.path.join(ppath, "outputs", filename2d)
+        ds = xr.open_dataset(out2d)
+        t_ = ds.time.values
         it = np.where(t_ == t)[0]
-        xdat = out[0].isel(time=it)
+        xdat = ds.isel(time=it)
         hfile = f"hotstart_{t.strftime('%Y%m%d.%H')}.nc"
         logger.info("saving hotstart file\n")
         xdat.to_netcdf(os.path.join(ppath, f"outputs/{hfile}"))
