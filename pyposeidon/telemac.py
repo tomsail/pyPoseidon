@@ -169,41 +169,6 @@ def write_netcdf(ds, outpath):
     ds.to_netcdf(fileOut)
 
 
-def ds_to_slf(ds, outpath, corrections, global_=True):
-    now = pd.Timestamp.now()
-    _date = [now.year, now.month, now.day, now.hour, now.minute, 0]
-
-    X = ds.SCHISM_hgrid_node_x.data
-    Y = ds.SCHISM_hgrid_node_y.data
-    # depth
-    Z = ds.depth.data
-    nan_mask = np.isnan(Z)
-    inf_mask = np.isinf(Z)
-    if np.any(nan_mask) or np.any(inf_mask):
-        Z[nan_mask] = 0
-        Z[inf_mask] = 0
-        logger.info("Z contains . Cleaning needed.")
-    # connectivity
-    IKLE2 = ds.SCHISM_hgrid_face_nodes.data
-
-    remove(outpath)
-
-    if global_:
-        # adjust triangles orientation on the dateline
-        # and also suppress the pole triangles (for now)
-        IKLE2 = fix_glob_connectivity(X, Y, IKLE2, corrections)
-
-    res = TelemacFile(outpath, access="w")
-    res.add_header("pyposeidon generated mesh", date=[1986, 2, 21, 0, 0, 0])
-    res.add_mesh(X, Y, IKLE2)
-    # add BOTTOM variable
-    res.add_variable("BOTTOM", "M")
-    res._values[0, 0, :] = Z
-    res.write()
-    res.close()
-    return res
-
-
 def write_meteo(outpath, geo, ds, gtype="grid", ttype="time", input360=False):
     lon = ds.longitude.values
     if input360:
@@ -794,6 +759,52 @@ class Telemac:
             else:
                 logger.info("dem from mesh file\n")
 
+    def to_slf(self, outpath, global_=True, friction_type="chezy", **kwargs):
+        corrections = get_value(self, kwargs, "mesh_corrections", {"reverse": [], "remove": []})
+        now = pd.Timestamp.now()
+        _date = [now.year, now.month, now.day, now.hour, now.minute, 0]
+
+        X = self.mesh.Dataset.SCHISM_hgrid_node_x.data
+        Y = self.mesh.Dataset.SCHISM_hgrid_node_y.data
+        # depth
+        Z = self.mesh.Dataset.depth.data
+        nan_mask = np.isnan(Z)
+        inf_mask = np.isinf(Z)
+        if np.any(nan_mask) or np.any(inf_mask):
+            Z[nan_mask] = 0
+            Z[inf_mask] = 0
+            logger.info("Z contains . Cleaning needed.")
+        # connectivity
+        IKLE2 = self.mesh.Dataset.SCHISM_hgrid_face_nodes.data
+        remove(outpath)
+
+        if global_:
+            # adjust triangles orientation on the dateline
+            # and also suppress the pole triangles (for now)
+            IKLE2 = fix_glob_connectivity(X, Y, IKLE2, corrections)
+
+        res = TelemacFile(outpath, access="w")
+        res.add_header("pyposeidon generated mesh", date=_date)
+        res.add_mesh(X, Y, IKLE2)
+        # add BOTTOM variable
+        res.add_variable("BOTTOM", "M")
+        res._values[0, 0, :] = Z
+        # bottom friction only in the case of TELEMAC2D
+        if self.tag == "telemac2d":
+            manning = get_value(self, kwargs, "manning", 0.027)
+            if friction_type == "chezy":
+                C = (abs(Z) ** (1 / 6)) / manning
+            else:
+                print("only Chezy implemented so far! ")
+                sys.exit()
+            res.add_variable("BOTTOM FRICTION", "")
+            res._values[0, 1, :] = C
+            logger.info("Manning file created..\n")
+        #
+        res.write()
+        res.close()
+        return res
+
     # ============================================================================================
     # EXECUTION
     # ============================================================================================
@@ -843,7 +854,6 @@ class Telemac:
         path = get_value(self, kwargs, "rpath", "./telemac/")
         flag = get_value(self, kwargs, "update", ["all"])
         split_by = get_value(self, kwargs, "meteo_split_by", None)
-        corrections = get_value(self, kwargs, "mesh_corrections", {"reverse": [], "remove": []})
 
         if not os.path.exists(path):
             os.makedirs(path)
@@ -863,7 +873,7 @@ class Telemac:
 
             logger.info("saving geometry file.. ")
             geo = os.path.join(path, "geo.slf")
-            slf = ds_to_slf(self.mesh.Dataset, geo, corrections, global_=True)
+            slf = self.to_slf(geo, global_=True)
             write_netcdf(self.mesh.Dataset, geo)
 
             # # WRITE METEO FILE
@@ -877,12 +887,6 @@ class Telemac:
             logger.info("saving boundary file.. ")
             domain = write_cli(geo, self.mesh.Dataset)
             self.params["N_bc"] = len(domain[0])
-
-            # TODO add the tracers info
-
-            # TODO ADD MANNING FILE (not priority)
-            manning = get_value(self, kwargs, "manning", 0.12)
-            logger.info("Manning file created..\n")
 
             # WRITE CAS FILE
             logger.info("saving CAS file.. ")
@@ -1357,17 +1361,14 @@ class Telemac:
             )
         )
 
-        stations = []
-        mesh_index = []
         coords = np.array([tgn.longitude.values, tgn.latitude.values]).T
         cp = closest_n_points(coords, 1, gpoints).T[0]
-        mesh_index.append(cp)
-        stations.append(gpoints[cp])
+        mesh_index = cp
+        stations = gpoints[cp]
 
-        if stations == []:
+        if len(stations) == 0:
             logger.warning("no observations available\n")
 
-        # to df
         stations = pd.DataFrame(stations, columns=["SCHISM_hgrid_node_x", "SCHISM_hgrid_node_y"])
         stations["z"] = 0
         stations.index += 1
@@ -1390,7 +1391,7 @@ class Telemac:
             f.write(
                 f"{0} {int(self.params['duration'])} {self.params['tstep']}\n"
             )  # 2nd line: period 1: start time, end time and interval (in seconds)
-            stations.loc[:, ["SCHISM_hgrid_node_x", "SCHISM_hgrid_node_y", "gindex", "provider_id"]].to_csv(
+            stations.loc[:, ["SCHISM_hgrid_node_x", "SCHISM_hgrid_node_y", "gindex"]].to_csv(
                 f, header=None, sep=" "
             )  # 3rd-10th line: output points; x coordinate, y coordinate, station number, and station name
 

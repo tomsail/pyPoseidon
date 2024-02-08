@@ -67,7 +67,7 @@ def normalize_column_names(dataframe: pd.DataFrame) -> pd.DataFrame:
         if location in cols:
             break
     else:
-        raise ValueError(f"Couldn't normalize longitude: {cols}")
+        raise ValueError(f"Couldn't normalize location: {cols}")
     # longitude
     for lon_name in LONGITUDE_NAMES:
         if lon_name in cols:
