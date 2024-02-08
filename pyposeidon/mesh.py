@@ -17,6 +17,7 @@ import logging
 import f90nml
 import os
 import subprocess
+import meshio
 
 from . import mjigsaw
 from . import moceanmesh
@@ -24,6 +25,7 @@ from . import mgmsh
 from . import tools
 from .boundary import Boundary
 from .utils.verify import verify
+from .utils.stereo import to_3d
 from .paths import DATA_PATH
 
 logger = logging.getLogger(__name__)
@@ -370,124 +372,139 @@ class tri2d:
         return g
 
     def to_file(self, filename, **kwargs):
-        logger.info("writing mesh to file {}".format(filename))
+        if filename.endswith(".gr3"):
+            logger.info("writing mesh to file {}".format(filename))
 
-        nn = self.Dataset.SCHISM_hgrid_node_x.size
-        n3e = self.Dataset.nSCHISM_hgrid_face.size
+            nn = self.Dataset.SCHISM_hgrid_node_x.size
+            n3e = self.Dataset.nSCHISM_hgrid_face.size
 
-        with open(filename, "w") as f:
-            f.write("\t uniform.gr3\n")
-            f.write("\t {} {}\n".format(n3e, nn))
+            with open(filename, "w") as f:
+                f.write("\t uniform.gr3\n")
+                f.write("\t {} {}\n".format(n3e, nn))
 
-        q = self.Dataset[["SCHISM_hgrid_node_x", "SCHISM_hgrid_node_y", "depth"]].to_dataframe()
+            q = self.Dataset[["SCHISM_hgrid_node_x", "SCHISM_hgrid_node_y", "depth"]].to_dataframe()
 
-        q.index = np.arange(1, len(q) + 1)
+            q.index = np.arange(1, len(q) + 1)
 
-        q.to_csv(
-            filename,
-            index=True,
-            sep="\t",
-            header=None,
-            mode="a",
-            float_format="%.10f",
-            columns=["SCHISM_hgrid_node_x", "SCHISM_hgrid_node_y", "depth"],
-        )
+            q.to_csv(
+                filename,
+                index=True,
+                sep="\t",
+                header=None,
+                mode="a",
+                float_format="%.10f",
+                columns=["SCHISM_hgrid_node_x", "SCHISM_hgrid_node_y", "depth"],
+            )
 
-        e = pd.DataFrame(
-            self.Dataset.SCHISM_hgrid_face_nodes.dropna(dim="nMaxSCHISM_hgrid_face_nodes").values,
-            columns=["a", "b", "c"],
-        )
+            e = pd.DataFrame(
+                self.Dataset.SCHISM_hgrid_face_nodes.dropna(dim="nMaxSCHISM_hgrid_face_nodes").values,
+                columns=["a", "b", "c"],
+            )
 
-        e["nv"] = e.apply(lambda row: row.dropna().size, axis=1)
+            e["nv"] = e.apply(lambda row: row.dropna().size, axis=1)
 
-        e.index = np.arange(1, len(e) + 1)
+            e.index = np.arange(1, len(e) + 1)
 
-        e = e.dropna(axis=1).astype(int)
+            e = e.dropna(axis=1).astype(int)
 
-        e.loc[:, ["a", "b", "c"]] = e.loc[:, ["a", "b", "c"]] + 1  # convert to fortran (index starts from 1)
+            e.loc[:, ["a", "b", "c"]] = e.loc[:, ["a", "b", "c"]] + 1  # convert to fortran (index starts from 1)
 
-        e.to_csv(
-            filename,
-            index=True,
-            sep="\t",
-            header=None,
-            mode="a",
-            columns=["nv", "a", "b", "c"],
-        )
+            e.to_csv(
+                filename,
+                index=True,
+                sep="\t",
+                header=None,
+                mode="a",
+                columns=["nv", "a", "b", "c"],
+            )
 
-        bs = self.Dataset[["node", "id", "type"]].to_dataframe()
+            bs = self.Dataset[["node", "id", "type"]].to_dataframe()
 
-        # open boundaries
-        number_of_open_boundaries = bs.loc[bs.type == "open"].id
-        if not number_of_open_boundaries.empty:
-            number_of_open_boundaries = number_of_open_boundaries.max()
+            # open boundaries
+            number_of_open_boundaries = bs.loc[bs.type == "open"].id
+            if not number_of_open_boundaries.empty:
+                number_of_open_boundaries = number_of_open_boundaries.max()
+            else:
+                number_of_open_boundaries = 0
+            number_of_open_boundaries_nodes = bs.loc[bs.type == "open"].shape[0]
+
+            if number_of_open_boundaries > 0:
+                with open(filename, "a") as f:
+                    f.write("{} = Number of open boundaries\n".format(number_of_open_boundaries))
+                    f.write("{} = Total number of open boundary nodes\n".format(number_of_open_boundaries_nodes))
+
+                    for i in range(1, number_of_open_boundaries + 1):
+                        dat = bs.loc[bs.id == i, "node"] + 1  # fortran
+                        f.write("{} = Number of nodes for open boundary {}\n".format(dat.size, i))
+                        dat.to_csv(f, index=None, header=False)
+
+            else:
+                with open(filename, "a") as f:
+                    f.write("{} = Number of open boundaries\n".format(0))
+                    f.write("{} = Total number of open boundary nodes\n".format(0))
+
+            # land boundaries
+
+            number_of_land_boundaries = bs.loc[bs.type == "land"].id
+            if not number_of_land_boundaries.empty:
+                number_of_land_boundaries = number_of_land_boundaries.max() - 1000
+            else:
+                number_of_land_boundaries = 0
+            number_of_land_boundaries_nodes = bs.loc[bs.type == "land"].shape[0]
+
+            number_of_island_boundaries = bs.loc[bs.type == "island"].id
+            if not number_of_island_boundaries.empty:
+                number_of_island_boundaries = number_of_island_boundaries.min()
+            else:
+                number_of_island_boundaries = 0
+            number_of_island_boundaries_nodes = bs.loc[bs.type == "island"].shape[0]
+
+            nlb = number_of_land_boundaries - number_of_island_boundaries
+            nlbn = number_of_land_boundaries_nodes + number_of_island_boundaries_nodes
+
+            if nlb > 0:
+                with open(filename, "a") as f:
+                    f.write("{} = Number of land boundaries\n".format(nlb))
+                    f.write("{} = Total number of land boundary nodes\n".format(nlbn))
+                    ik = 1
+            else:
+                with open(filename, "a") as f:
+                    f.write("{} = Number of land boundaries\n".format(0))
+                    f.write("{} = Total number of land boundary nodes\n".format(0))
+
+            if number_of_land_boundaries > 0:
+                with open(filename, "a") as f:
+                    for i in range(1001, 1000 + number_of_land_boundaries + 1):
+                        dat_ = bs.loc[bs.id == i]
+                        dat = dat_.node + 1  # fortran
+
+                        f.write("{} {} = Number of nodes for land boundary {}\n".format(dat.size, 0, ik))
+                        dat.to_csv(f, index=None, header=False)
+                        ik += 1
+
+            if number_of_island_boundaries < 0:
+                with open(filename, "a") as f:
+                    for i in range(-1, number_of_island_boundaries - 1, -1):
+                        dat_ = bs.loc[bs.id == i]
+                        dat = dat_.node + 1  # fortran
+
+                        f.write("{} {} = Number of nodes for land boundary {}\n".format(dat.size, 1, ik))
+                        dat.to_csv(f, index=None, header=False)
+                        ik += 1
         else:
-            number_of_open_boundaries = 0
-        number_of_open_boundaries_nodes = bs.loc[bs.type == "open"].shape[0]
-
-        if number_of_open_boundaries > 0:
-            with open(filename, "a") as f:
-                f.write("{} = Number of open boundaries\n".format(number_of_open_boundaries))
-                f.write("{} = Total number of open boundary nodes\n".format(number_of_open_boundaries_nodes))
-
-                for i in range(1, number_of_open_boundaries + 1):
-                    dat = bs.loc[bs.id == i, "node"] + 1  # fortran
-                    f.write("{} = Number of nodes for open boundary {}\n".format(dat.size, i))
-                    dat.to_csv(f, index=None, header=False)
-
-        else:
-            with open(filename, "a") as f:
-                f.write("{} = Number of open boundaries\n".format(0))
-                f.write("{} = Total number of open boundary nodes\n".format(0))
-
-        # land boundaries
-
-        number_of_land_boundaries = bs.loc[bs.type == "land"].id
-        if not number_of_land_boundaries.empty:
-            number_of_land_boundaries = number_of_land_boundaries.max() - 1000
-        else:
-            number_of_land_boundaries = 0
-        number_of_land_boundaries_nodes = bs.loc[bs.type == "land"].shape[0]
-
-        number_of_island_boundaries = bs.loc[bs.type == "island"].id
-        if not number_of_island_boundaries.empty:
-            number_of_island_boundaries = number_of_island_boundaries.min()
-        else:
-            number_of_island_boundaries = 0
-        number_of_island_boundaries_nodes = bs.loc[bs.type == "island"].shape[0]
-
-        nlb = number_of_land_boundaries - number_of_island_boundaries
-        nlbn = number_of_land_boundaries_nodes + number_of_island_boundaries_nodes
-
-        if nlb > 0:
-            with open(filename, "a") as f:
-                f.write("{} = Number of land boundaries\n".format(nlb))
-                f.write("{} = Total number of land boundary nodes\n".format(nlbn))
-                ik = 1
-        else:
-            with open(filename, "a") as f:
-                f.write("{} = Number of land boundaries\n".format(0))
-                f.write("{} = Total number of land boundary nodes\n".format(0))
-
-        if number_of_land_boundaries > 0:
-            with open(filename, "a") as f:
-                for i in range(1001, 1000 + number_of_land_boundaries + 1):
-                    dat_ = bs.loc[bs.id == i]
-                    dat = dat_.node + 1  # fortran
-
-                    f.write("{} {} = Number of nodes for land boundary {}\n".format(dat.size, 0, ik))
-                    dat.to_csv(f, index=None, header=False)
-                    ik += 1
-
-        if number_of_island_boundaries < 0:
-            with open(filename, "a") as f:
-                for i in range(-1, number_of_island_boundaries - 1, -1):
-                    dat_ = bs.loc[bs.id == i]
-                    dat = dat_.node + 1  # fortran
-
-                    f.write("{} {} = Number of nodes for land boundary {}\n".format(dat.size, 1, ik))
-                    dat.to_csv(f, index=None, header=False)
-                    ik += 1
+            file_format = kwargs.get("file_format", None)
+            dim = kwargs.get("dim", "2D")
+            if file_format is None:
+                logger.error("file_format must be specified")
+                raise ValueError("file_format must be specified")
+            if dim == "3D":
+                x, y, z = to_3d(self.Dataset.SCHISM_hgrid_node_x, self.Dataset.SCHISM_hgrid_node_y, R=6.731e6)
+                points = np.column_stack((x, y, z))
+            else:
+                points = np.column_stack((self.Dataset.SCHISM_hgrid_node_x, self.Dataset.SCHISM_hgrid_node_y))
+            cells = [("triangle", self.Dataset.SCHISM_hgrid_face_nodes)]
+            mesh = meshio.Mesh(points, cells)
+            mesh.write(filename, file_format=file_format)
 
     def validate(self, **kwargs):
         # ---------------------------------------------------------------------
