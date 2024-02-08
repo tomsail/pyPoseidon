@@ -118,6 +118,7 @@ def cfgrib(
 ):
     backend_kwargs = kwargs.get("meteo_backend_kwargs", {"indexpath": ""})
     xr_kwargs = kwargs.get("meteo_xr_kwargs", {})  # {'concat_dim':'step'})
+    gtype = kwargs.get("gtype", "grid")  # {'concat_dim':'step'})
     minlon = lon_min
     maxlon = lon_max
 
@@ -245,36 +246,40 @@ def cfgrib(
     lat_0 = max(0, j0 - 2)
     lat_1 = min(data.latitude.size, j1 + 2)
 
-    # descenting lats
-    if j0 > j1:
-        j0, j1 = j1, j0
-        lat_0 = max(0, j0 - 1)
-        lat_1 = min(data.latitude.size, j1 + 3)
+    if gtype == "grid":
+        # descenting lats
+        if j0 > j1:
+            j0, j1 = j1, j0
+            lat_0 = max(0, j0 - 1)
+            lat_1 = min(data.latitude.size, j1 + 3)
 
-    if i0 >= i1:
-        sh = (
-            data[["msl", "u10", "v10"]]
-            .isel(
-                longitude=slice(lon_0, data.longitude.size),
-                latitude=slice(lat_0, lat_1),
+        if i0 >= i1:
+            sh = (
+                data[["msl", "u10", "v10"]]
+                .isel(
+                    longitude=slice(lon_0, data.longitude.size),
+                    latitude=slice(lat_0, lat_1),
+                )
+                .sel(time=tslice)
             )
-            .sel(time=tslice)
-        )
-        sh = sh.assign_coords({"longitude": sh.longitude.values - 360.0})
+            sh = sh.assign_coords({"longitude": sh.longitude.values - 360.0})
 
-        sh1 = (
-            data[["msl", "u10", "v10"]].isel(longitude=slice(0, lon_1), latitude=slice(lat_0, lat_1)).sel(time=tslice)
-        )
+            sh1 = (
+                data[["msl", "u10", "v10"]]
+                .isel(longitude=slice(0, lon_1), latitude=slice(lat_0, lat_1))
+                .sel(time=tslice)
+            )
 
-        tot = xr.concat([sh, sh1], dim="longitude")
+            tot = xr.concat([sh, sh1], dim="longitude")
 
+        else:
+            tot = (
+                data[["msl", "u10", "v10"]]
+                .isel(longitude=slice(lon_0, lon_1), latitude=slice(lat_0, lat_1))
+                .sel(time=tslice)
+            )
     else:
-        tot = (
-            data[["msl", "u10", "v10"]]
-            .isel(longitude=slice(lon_0, lon_1), latitude=slice(lat_0, lat_1))
-            .sel(time=tslice)
-        )
-
+        tot = data
     # Adjust lon values
     try:
         if np.abs(np.mean([lon_min, lon_max]) - np.mean([minlon, maxlon])) > 300.0:
