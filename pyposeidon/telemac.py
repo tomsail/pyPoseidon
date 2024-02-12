@@ -50,6 +50,7 @@ from pretel.extract_contour import detecting_boundaries
 from pretel.generate_atm import generate_atm
 from pretel.extract_contour import sorting_boundaries
 from utils.progressbar import ProgressBar
+from pretel.manip_telfile import alter
 from mpi4py import MPI
 
 import numpy as np
@@ -251,8 +252,18 @@ def write_meteo(outpath, geo, ds, gtype="grid", ttype="time", input360=False):
     atm.write()
     atm.close()
 
+    # TEMP FIX NAMES CONVENTION for v8p5
+    tmpFile2 = os.path.splitext(outpath)[0] + "_tmp2.slf"
+    tmpFile3 = os.path.splitext(outpath)[0] + "_tmp3.slf"
     # interpolate on geo mesh
-    generate_atm(geo, tmpFile, outpath, None)
+    generate_atm(geo, tmpFile, tmpFile2, None)
+    remove(tmpFile3)
+    alter(tmpFile2, tmpFile3, rename_var="WIND VELOCITY U=WINDX")
+    remove(outpath)
+    alter(tmpFile3, outpath,  rename_var="WIND VELOCITY V=WINDY")
+    remove(tmpFile)
+    remove(tmpFile2)
+    remove(tmpFile3)
 
 
 #
@@ -573,10 +584,10 @@ class Telemac:
         # export grid data every hour
         res_min = get_value(self, kwargs, "resolution_min", 0.5)
 
-        if self.tstep is None:
-            tstep = calculate_time_step_hourly_multiple(res_min)
-        else:
+        if self.tstep:
             tstep = self.tstep
+        else:
+            tstep = calculate_time_step_hourly_multiple(res_min)
         params["tstep"] = tstep
 
         params["nb_tsteps"] = int(duration / tstep)
