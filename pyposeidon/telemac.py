@@ -802,12 +802,16 @@ class Telemac:
         res._values[0, 0, :] = Z
         # bottom friction only in the case of TELEMAC2D
         if self.tag == "telemac2d":
-            manning = get_value(self, kwargs, "manning", 0.027)
-            if friction_type == "chezy":
-                C = (abs(Z) ** (1 / 6)) / manning
+            chezy = get_value(self, kwargs, "chezy", None)
+            if chezy:
+                C = np.ones(len(Z))
             else:
-                print("only Chezy implemented so far! ")
-                sys.exit()
+                manning = get_value(self, kwargs, "manning", 0.027)
+                if friction_type == "chezy":
+                    C = (abs(Z) ** (1 / 6)) / manning
+                else:
+                    print("only Chezy implemented so far! ")
+                    sys.exit()
             res.add_variable("BOTTOM FRICTION", "")
             res._values[0, 1, :] = C
             logger.info("Manning file created..\n")
