@@ -804,7 +804,7 @@ class Telemac:
         if self.tag == "telemac2d":
             chezy = get_value(self, kwargs, "chezy", None)
             if chezy:
-                C = np.ones(len(Z))
+                C = np.ones(len(Z)) * chezy
             else:
                 manning = get_value(self, kwargs, "manning", 0.027)
                 if friction_type == "chezy":
