@@ -174,13 +174,10 @@ def write_netcdf(ds, outpath):
 def write_meteo(outpath, geo, ds, gtype="grid", ttype="time", input360=False):
     lon = ds.longitude.values
     if input360:
-        lon[lon < -180] += 360
+        lon[lon > 180] -= 360
     lat = ds.latitude.values
-    #
-    vars = list(ds.keys())
 
     tmpFile = os.path.splitext(outpath)[0] + "_tmp.slf"
-
     remove(tmpFile)
 
     if gtype == "grid":
@@ -256,16 +253,8 @@ def write_meteo(outpath, geo, ds, gtype="grid", ttype="time", input360=False):
 
     # interpolate on geo mesh
     generate_atm(geo, tmpFile, outpath, None)
-    # remove(tmpFile3)
-    # alter(tmpFile2, tmpFile3, rename_var="WIND VELOCITY U=WINDX")
-    # remove(outpath)
-    # alter(tmpFile3, outpath, rename_var="WIND VELOCITY V=WINDY")
-    # remove(tmpFile)
-    # remove(tmpFile2)
-    # remove(tmpFile3)
 
 
-#
 def get_boundary_settings(boundary_type, glo_node, bnd_node):
     settings = {
         "lihbor": 5 if boundary_type == "open" else 2,
