@@ -51,6 +51,7 @@ from pretel.generate_atm import generate_atm
 from pretel.extract_contour import sorting_boundaries
 from utils.progressbar import ProgressBar
 from pretel.manip_telfile import alter
+from xarray_selafin.xarray_backend import SelafinAccessor
 from mpi4py import MPI
 
 import numpy as np
@@ -177,13 +178,10 @@ def write_meteo(outpath, geo, ds, gtype="grid", ttype="time", input360=False):
     lat = ds.latitude.values
     #
     vars = list(ds.keys())
-    var_used = []
 
     tmpFile = os.path.splitext(outpath)[0] + "_tmp.slf"
 
     remove(tmpFile)
-
-    atm = TelemacFile(tmpFile, access="w")
 
     if gtype == "grid":
         nx1d = len(lon)
@@ -213,57 +211,58 @@ def write_meteo(outpath, geo, ds, gtype="grid", ttype="time", input360=False):
         tri = Delaunay(np.column_stack((lon, lat)))
         ikle3 = tri.simplices
 
-    atm.add_mesh(x, y, ikle3)
-
     if ttype == "time":
         t0 = pd.Timestamp(ds.time.values[0])
-        seconds = (pd.DatetimeIndex(ds.time.values) - t0).total_seconds()
     elif ttype == "step":
         t0 = pd.Timestamp(ds.time.values)
         seconds = ds.step.values / 1e9
-    datetime = [t0.year, t0.month, t0.day, t0.hour, t0.minute, t0.second, 0]
-    atm.add_header("pyposeidon generated mesh", date=datetime)
+        ds.time = pd.to_datetime(t0 + pd.Timedelta(seconds=seconds))
 
-    # Meta data and variable names
-    if "u10" in vars:
-        atm.add_variable("WIND VELOCITY U", "M/S")
-        var_used.append("u10")
-    if "v10" in vars:
-        atm.add_variable("WIND VELOCITY V", "M/S")
-        var_used.append("v10")
-    if "msl" in vars:
-        atm.add_variable("SURFACE PRESSURE", "UI")
-        var_used.append("msl")
-    if "tmp " in vars:
-        atm.add_variable("AIR TEMPERATURE ", "DEGREES")
-        var_used.append("tmp")
-    if not atm.varnames:
-        raise ValueError("There are no meteorological variables to convert!")
+    data_vars = {}
+    var_attrs = {}
+    dtype = np.float64
+    dims = ["time", "node"]
+    shape = (len(ds.time), len(x))
 
-    pbar = ProgressBar(len(seconds))
-    atm._times = np.array(seconds, dtype=np.float64)
-    atm._ntimestep = len(seconds)
-    atm._values = np.zeros((len(seconds), atm._nvar, atm._npoin3))
-    for itime, t_ in enumerate(seconds):
-        pbar.update(itime)
-        for var_ds, var_tel in zip(var_used, atm.varnames):
-            data = np.ravel(np.transpose(ds.isel(time=itime)[var_ds].values))
-            atm.add_data_value(var_tel, itime, data)
-    atm.write()
-    atm.close()
+    coords = {
+        "x": ("node", x),
+        "y": ("node", y),
+        "time": ds.time,
+        # Consider how to include IPOBO (with node and plan dimensions?) if it's essential for your analysis
+    }
 
-    # TEMP FIX NAMES CONVENTION for v8p5
-    tmpFile2 = os.path.splitext(outpath)[0] + "_tmp2.slf"
-    tmpFile3 = os.path.splitext(outpath)[0] + "_tmp3.slf"
+    # Define a mapping from the original variable names to the new ones
+    var_map = {
+        "u10": ("WINDX", "WINDX", "M/S"),
+        "v10": ("WINDY", "WINDY", "M/S"),
+        "msl": ("PATM", "PATM", "PASCAL"),
+        "tmp": ("TAIR", "TEMPERATURE", "DEGREES C"),
+    }
+    for var in ds.data_vars:
+        if var in var_map:
+            # attributes
+            var_attrs[var_map[var][0]] = (var_map[var][1], var_map[var][2])
+            # data
+            data = np.empty(shape, dtype=dtype)
+            for it, t_ in enumerate(ds.time):
+                data[it, :] = np.ravel(np.transpose(ds.isel(time=it)[var].values))
+            data_vars[var_map[var][0]] = xr.Variable(dims=dims, data=data)
+
+    atm = xr.Dataset(data_vars=data_vars, coords=coords)
+    atm.attrs["date_start"] = [t0.year, t0.month, t0.day, t0.hour, t0.minute, t0.second]
+    atm.attrs["ikle2"] = ikle3 + 1
+    atm.attrs["variables"] = var_attrs
+    atm.selafin.write(tmpFile)
+
     # interpolate on geo mesh
-    generate_atm(geo, tmpFile, tmpFile2, None)
-    remove(tmpFile3)
-    alter(tmpFile2, tmpFile3, rename_var="WIND VELOCITY U=WINDX")
-    remove(outpath)
-    alter(tmpFile3, outpath,  rename_var="WIND VELOCITY V=WINDY")
-    remove(tmpFile)
-    remove(tmpFile2)
-    remove(tmpFile3)
+    generate_atm(geo, tmpFile, outpath, None)
+    # remove(tmpFile3)
+    # alter(tmpFile2, tmpFile3, rename_var="WIND VELOCITY U=WINDX")
+    # remove(outpath)
+    # alter(tmpFile3, outpath, rename_var="WIND VELOCITY V=WINDY")
+    # remove(tmpFile)
+    # remove(tmpFile2)
+    # remove(tmpFile3)
 
 
 #
@@ -770,10 +769,39 @@ class Telemac:
             else:
                 logger.info("dem from mesh file\n")
 
-    def to_slf(self, outpath, global_=True, friction_type="chezy", **kwargs):
-        corrections = get_value(self, kwargs, "mesh_corrections", {"reverse": [], "remove": []})
+    @staticmethod
+    def mesh_to_slf(
+        x, y, z, tri, outpath, tag="telemac2d", chezy=None, manning=0.027, friction_type="chezy", **kwargs
+    ):
         now = pd.Timestamp.now()
         _date = [now.year, now.month, now.day, now.hour, now.minute, 0]
+        #
+        res = TelemacFile(outpath, access="w")
+        res.add_header("pyposeidon generated mesh", date=_date)
+        res.add_mesh(x, y, tri)
+        # add BOTTOM variable
+        res.add_variable("BOTTOM", "M")
+        res._values[0, 0, :] = z
+        # bottom friction only in the case of TELEMAC2D
+        if tag == "telemac2d":
+            if chezy:
+                c = np.ones(len(z)) * chezy
+            else:
+                if friction_type == "chezy":
+                    c = (abs(z) ** (1 / 6)) / manning
+                else:
+                    print("only Chezy implemented so far! ")
+                    sys.exit()
+            res.add_variable("BOTTOM FRICTION", "")
+            res._values[0, 1, :] = c
+            logger.info("Manning file created..\n")
+        #
+        res.write()
+        res.close()
+        return res
+
+    def to_slf(self, outpath, global_=True, friction_type="chezy", **kwargs):
+        corrections = get_value(self, kwargs, "mesh_corrections", {"reverse": [], "remove": []})
 
         X = self.mesh.Dataset.SCHISM_hgrid_node_x.data
         Y = self.mesh.Dataset.SCHISM_hgrid_node_y.data
@@ -794,30 +822,10 @@ class Telemac:
             # and also suppress the pole triangles (for now)
             IKLE2 = fix_glob_connectivity(X, Y, IKLE2, corrections)
 
-        res = TelemacFile(outpath, access="w")
-        res.add_header("pyposeidon generated mesh", date=_date)
-        res.add_mesh(X, Y, IKLE2)
-        # add BOTTOM variable
-        res.add_variable("BOTTOM", "M")
-        res._values[0, 0, :] = Z
-        # bottom friction only in the case of TELEMAC2D
-        if self.tag == "telemac2d":
-            chezy = get_value(self, kwargs, "chezy", None)
-            if chezy:
-                C = np.ones(len(Z)) * chezy
-            else:
-                manning = get_value(self, kwargs, "manning", 0.027)
-                if friction_type == "chezy":
-                    C = (abs(Z) ** (1 / 6)) / manning
-                else:
-                    print("only Chezy implemented so far! ")
-                    sys.exit()
-            res.add_variable("BOTTOM FRICTION", "")
-            res._values[0, 1, :] = C
-            logger.info("Manning file created..\n")
-        #
-        res.write()
-        res.close()
+        # write mesh
+        chezy = get_value(self, kwargs, "chezy", None)
+        manning = get_value(self, kwargs, "manning", 0.027)
+        res = self.mesh_to_slf(X, Y, Z, IKLE2, outpath, self.tag, chezy, manning, friction_type)
         return res
 
     # ============================================================================================
@@ -829,7 +837,6 @@ class Telemac:
 
         # Set background dem as scale for mesh generation
         dpath = get_value(self, kwargs, "dem_source", None)
-
         if dpath:
             self.dem = pdem.Dem(**kwargs)
             # kwargs.update({"dem_source": self.dem.Dataset})
@@ -891,7 +898,7 @@ class Telemac:
             slf = self.to_slf(geo, global_=True)
             write_netcdf(self.mesh.Dataset, geo)
 
-            # # WRITE METEO FILE
+            # WRITE METEO FILE
             logger.info("saving meteo file.. ")
             meteo = os.path.join(path, "input_wind.slf")
             self.atm = write_meteo(
