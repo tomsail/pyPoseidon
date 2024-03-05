@@ -50,6 +50,8 @@ from pretel.extract_contour import detecting_boundaries
 from pretel.generate_atm import generate_atm
 from pretel.extract_contour import sorting_boundaries
 from utils.progressbar import ProgressBar
+from utils.geometry import get_weights
+from utils.geometry import interp
 from pretel.manip_telfile import alter
 from xarray_selafin.xarray_backend import SelafinAccessor
 from mpi4py import MPI
@@ -177,36 +179,14 @@ def write_meteo(outpath, geo, ds, gtype="grid", ttype="time", input360=False):
         lon[lon > 180] -= 360
     lat = ds.latitude.values
 
-    tmpFile = os.path.splitext(outpath)[0] + "_tmp.slf"
-    remove(tmpFile)
-
     if gtype == "grid":
         nx1d = len(lon)
         ny1d = len(lat)
         x = np.tile(lon, ny1d).reshape(ny1d, nx1d).T.ravel()
         y = np.tile(lat, nx1d)
-        nelem2 = 2 * (nx1d - 1) * (ny1d - 1)
-        # set geometry
-        ikle3 = np.zeros((nelem2, 3), dtype=np.int32)
-        ielem = 0
-        for i in range(1, nx1d):
-            for j in range(1, ny1d):
-                ipoin = (i - 1) * ny1d + j - 1
-                # ~~> first triangle
-                ikle3[ielem][0] = ipoin
-                ikle3[ielem][1] = ipoin + ny1d
-                ikle3[ielem][2] = ipoin + 1
-                ielem += 1
-                # ~~> second triangle
-                ikle3[ielem][0] = ipoin + ny1d
-                ikle3[ielem][1] = ipoin + ny1d + 1
-                ikle3[ielem][2] = ipoin + 1
-                ielem += 1
     else:
         x = lon
         y = lat
-        tri = Delaunay(np.column_stack((lon, lat)))
-        ikle3 = tri.simplices
 
     if ttype == "time":
         t0 = pd.Timestamp(ds.time.values[0])
@@ -215,17 +195,23 @@ def write_meteo(outpath, geo, ds, gtype="grid", ttype="time", input360=False):
         seconds = ds.step.values / 1e9
         ds.time = pd.to_datetime(t0 + pd.Timedelta(seconds=seconds))
 
+    geo = xr.open_dataset(geo, engine = 'selafin')
+
+    in_xy = np.vstack((x,y)).T
+    out_xy = np.vstack((geo.x,geo.y)).T
+    logger.info(f"Geting interp weights from {len(x)} on {len(geo.x)} nodes")
+    vert, wgts, u_x, g_x = get_weights(in_xy, out_xy)
+
     data_vars = {}
     var_attrs = {}
     dtype = np.float64
     dims = ["time", "node"]
-    shape = (len(ds.time), len(x))
+    shape = (len(ds.time), len(geo.x))
 
     coords = {
-        "x": ("node", x),
-        "y": ("node", y),
+        "x": ("node", geo.x.data),
+        "y": ("node", geo.y.data),
         "time": ds.time,
-        # Consider how to include IPOBO (with node and plan dimensions?) if it's essential for your analysis
     }
 
     # Define a mapping from the original variable names to the new ones
@@ -242,17 +228,15 @@ def write_meteo(outpath, geo, ds, gtype="grid", ttype="time", input360=False):
             # data
             data = np.empty(shape, dtype=dtype)
             for it, t_ in enumerate(ds.time):
-                data[it, :] = np.ravel(np.transpose(ds.isel(time=it)[var].values))
+                tmp = np.ravel(np.transpose(ds.isel(time=it)[var].values))
+                data[it, :] = interp(tmp, vert, wgts, u_x, g_x)
             data_vars[var_map[var][0]] = xr.Variable(dims=dims, data=data)
 
     atm = xr.Dataset(data_vars=data_vars, coords=coords)
     atm.attrs["date_start"] = [t0.year, t0.month, t0.day, t0.hour, t0.minute, t0.second]
-    atm.attrs["ikle2"] = ikle3 + 1
+    atm.attrs["ikle2"] = geo.attrs['ikle2']
     atm.attrs["variables"] = var_attrs
-    atm.selafin.write(tmpFile)
-
-    # interpolate on geo mesh
-    generate_atm(geo, tmpFile, outpath, None)
+    atm.selafin.write(outpath)
 
 
 def get_boundary_settings(boundary_type, glo_node, bnd_node):
@@ -762,15 +746,19 @@ class Telemac:
     def mesh_to_slf(
         x, y, z, tri, outpath, tag="telemac2d", chezy=None, manning=0.027, friction_type="chezy", **kwargs
     ):
-        now = pd.Timestamp.now()
-        _date = [now.year, now.month, now.day, now.hour, now.minute, 0]
         #
-        res = TelemacFile(outpath, access="w")
-        res.add_header("pyposeidon generated mesh", date=_date)
-        res.add_mesh(x, y, tri)
-        # add BOTTOM variable
-        res.add_variable("BOTTOM", "M")
-        res._values[0, 0, :] = z
+        ds = xr.Dataset(
+            {
+                "B": (("time", "node"), z[np.newaxis,:]),
+                # Add other variables as needed
+            },
+            coords={
+                "x": ("node", x),
+                "y": ("node", y),
+                "time": [pd.Timestamp.now()],
+            }
+        )
+        ds.attrs['ikle2'] = tri + 1
         # bottom friction only in the case of TELEMAC2D
         if tag == "telemac2d":
             if chezy:
@@ -781,13 +769,10 @@ class Telemac:
                 else:
                     print("only Chezy implemented so far! ")
                     sys.exit()
-            res.add_variable("BOTTOM FRICTION", "")
-            res._values[0, 1, :] = c
+            ds['W'] = xr.Variable(dims=["node"], data=c)
             logger.info("Manning file created..\n")
-        #
-        res.write()
-        res.close()
-        return res
+        ds.selafin.write(outpath)
+
 
     def to_slf(self, outpath, global_=True, friction_type="chezy", **kwargs):
         corrections = get_value(self, kwargs, "mesh_corrections", {"reverse": [], "remove": []})
@@ -814,8 +799,7 @@ class Telemac:
         # write mesh
         chezy = get_value(self, kwargs, "chezy", None)
         manning = get_value(self, kwargs, "manning", 0.027)
-        res = self.mesh_to_slf(X, Y, Z, IKLE2, outpath, self.tag, chezy, manning, friction_type)
-        return res
+        self.mesh_to_slf(X, Y, Z, IKLE2, outpath, self.tag, chezy, manning, friction_type)
 
     # ============================================================================================
     # EXECUTION
@@ -884,7 +868,7 @@ class Telemac:
 
             logger.info("saving geometry file.. ")
             geo = os.path.join(path, "geo.slf")
-            slf = self.to_slf(geo, global_=True)
+            self.to_slf(geo, global_=True)
             write_netcdf(self.mesh.Dataset, geo)
 
             # WRITE METEO FILE
