@@ -559,34 +559,10 @@ class TelemacCast:
         logger.debug(".. done")
 
         # create restart file
-        logger.debug("create restart file")
-
-        # check for combine hotstart
-        logger.debug(f"hotout_t = {self.sdate.strftime('%Y%m%d.%H')}")
-
-        # link restart file - NetCDF
-        inresfile = os.path.join(ppath, f"outputs/hotstart_{self.sdate.strftime('%Y%m%d.%H')}.nc")
-        outresfile = os.path.join(rpath, "hotstart.nc")
-
-        logger.debug("hotstart_file: %s", inresfile)
-        if not os.path.exists(inresfile):
-            logger.info("Generating hotstart file.\n")
-            # load model config from ppath
-            with open(os.path.join(ppath, self.tag + "_model.json"), "rb") as f:
-                data = json.load(f)
-                data = pd.json_normalize(data, max_level=0)
-                ph = data.to_dict(orient="records")[0]
-            p = pm.set(**ph)
-            p.hotstart(t=self.sdate, ppath=ppath)
-        else:
-            logger.info("Hotstart file already existing. Skipping creation.\n")
-
-        copy_or_symlink(inresfile, outresfile, copy)
-
+        logger.debug("copy restart file")
         # link restart file - TELEMAC
         inresfile = os.path.join(ppath, f"restart_2D.slf")
         outresfile = os.path.join(rpath, "prev_2D.slf")
-
         copy_or_symlink(inresfile, outresfile, True)
         # need True for telemac: symlink does not work
 
