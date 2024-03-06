@@ -37,6 +37,7 @@ from pyposeidon.utils.norm import normalize_column_names
 from pyposeidon.utils.norm import normalize_varnames
 from pyposeidon.utils.obs import get_obs_data
 from pyposeidon.utils.post import export_xarray
+from pyposeidon.utils.post import remove
 
 # telemac (needs telemac stack on conda)
 from telapy.api.t2d import Telemac2d
@@ -98,19 +99,6 @@ def calculate_time_step_hourly_multiple(resolution, min_water_depth=0.1, courant
 
 
 # Helper functions
-def remove(path):
-    try:
-        if os.path.isfile(path):
-            os.remove(path)  # Remove a file
-        elif os.path.isdir(path):
-            if not os.listdir(path):  # Check if the directory is empty
-                os.rmdir(path)
-            else:
-                shutil.rmtree(path)
-    except OSError as e:
-        print(f"Error: {e.strerror}")
-
-
 def is_ccw(tris, meshx, meshy):
     x1, x2, x3 = meshx[tris].T
     y1, y2, y3 = meshy[tris].T
@@ -195,10 +183,10 @@ def write_meteo(outpath, geo, ds, gtype="grid", ttype="time", input360=False):
         seconds = ds.step.values / 1e9
         ds.time = pd.to_datetime(t0 + pd.Timedelta(seconds=seconds))
 
-    geo = xr.open_dataset(geo, engine = 'selafin')
+    geo = xr.open_dataset(geo, engine="selafin")
 
-    in_xy = np.vstack((x,y)).T
-    out_xy = np.vstack((geo.x,geo.y)).T
+    in_xy = np.vstack((x, y)).T
+    out_xy = np.vstack((geo.x, geo.y)).T
     logger.info(f"Geting interp weights from {len(x)} on {len(geo.x)} nodes")
     vert, wgts, u_x, g_x = get_weights(in_xy, out_xy)
 
@@ -234,7 +222,7 @@ def write_meteo(outpath, geo, ds, gtype="grid", ttype="time", input360=False):
 
     atm = xr.Dataset(data_vars=data_vars, coords=coords)
     atm.attrs["date_start"] = [t0.year, t0.month, t0.day, t0.hour, t0.minute, t0.second]
-    atm.attrs["ikle2"] = geo.attrs['ikle2']
+    atm.attrs["ikle2"] = geo.attrs["ikle2"]
     atm.attrs["variables"] = var_attrs
     atm.selafin.write(outpath)
 
@@ -749,16 +737,16 @@ class Telemac:
         #
         ds = xr.Dataset(
             {
-                "B": (("time", "node"), z[np.newaxis,:]),
+                "B": (("time", "node"), z[np.newaxis, :]),
                 # Add other variables as needed
             },
             coords={
                 "x": ("node", x),
                 "y": ("node", y),
                 "time": [pd.Timestamp.now()],
-            }
+            },
         )
-        ds.attrs['ikle2'] = tri + 1
+        ds.attrs["ikle2"] = tri + 1
         # bottom friction only in the case of TELEMAC2D
         if tag == "telemac2d":
             if chezy:
@@ -769,10 +757,9 @@ class Telemac:
                 else:
                     print("only Chezy implemented so far! ")
                     sys.exit()
-            ds['W'] = xr.Variable(dims=["node"], data=c)
+            ds["W"] = xr.Variable(dims=["node"], data=c)
             logger.info("Manning file created..\n")
         ds.selafin.write(outpath)
-
 
     def to_slf(self, outpath, global_=True, friction_type="chezy", **kwargs):
         corrections = get_value(self, kwargs, "mesh_corrections", {"reverse": [], "remove": []})

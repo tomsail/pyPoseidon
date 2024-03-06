@@ -39,6 +39,25 @@ TEL_MAP_SHORT = {
     "AIR TEMPERATURE ": "tair",
 }
 
+TEL_MAP_SHORT2 = {
+    "x": "longitude",
+    "y": "latitude",
+    "U": "u",
+    "V": "v",
+    "S": "elev",
+    "HM0": "hm0",
+    "DIRM": "dir",
+    "TM01": "tm01",
+    "TM02": "tm02",
+    "TMOY": "tmoy",
+    "TPR8": "tp",
+    "TPD": "tp",
+    "WINDX": "u10",
+    "WINDY": "v10",
+    "PATM": "msl",
+    "TAIR": "tair",
+}
+
 
 def normalize_coord_names(dataset: xr.Dataset) -> xr.Dataset:
     """Return a dataset with coords containing "longitude" and "latitude" """
@@ -88,7 +107,7 @@ def normalize_column_names(dataframe: pd.DataFrame) -> pd.DataFrame:
     return dataframe
 
 
-def normalize_varnames(varnames, mapping=TEL_MAP_SHORT):
+def normalize_varnames(varnames, mapping=TEL_MAP_SHORT2):
     normalized_names = []
     for v in varnames:
         if v in mapping:

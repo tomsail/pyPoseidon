@@ -7,6 +7,8 @@ import numpy as np
 from tqdm.auto import tqdm
 import glob
 import numcodecs
+import tarfile
+import shutil
 
 import pyposeidon
 from pyposeidon.utils import data
@@ -51,7 +53,38 @@ def get_encoding(ename):
     }
 
 
-def export_xarray(ds, filename_out, chunk=None):
+def remove(path):
+    try:
+        if os.path.isfile(path):
+            os.remove(path)  # Remove a file
+        elif os.path.isdir(path):
+            if not os.listdir(path):  # Check if the directory is empty
+                os.rmdir(path)
+            else:
+                shutil.rmtree(path)
+    except OSError as e:
+        print(f"Error: {e.strerror}")
+
+
+def tar_directory(input_directory, output_filename, compress=False):
+    """
+    Tar a Zarr directory.
+
+    Parameters
+    ----------
+    input_directory : str
+        The path to the Zarr directory to archive.
+    output_filename : str
+        The path and filename for the output archive.
+    compress : bool, optional
+        Whether to compress the archive with gzip. Default is True.
+    """
+    mode = "w:gz" if compress else "w"
+    with tarfile.open(output_filename, mode) as tar:
+        tar.add(input_directory, arcname=os.path.basename(input_directory))
+
+
+def export_xarray(ds, filename_out, chunk=None, remove_dir=False):
     """
     Export an xarray dataset to netcdf or zarr format.
 
@@ -96,6 +129,9 @@ def export_xarray(ds, filename_out, chunk=None):
         for varname in list(ds.variables):
             encoding.update({varname: {"compressor": compressor}})
         ds.to_zarr(filename_out, encoding=encoding, consolidated=True)
+        tar_directory(filename_out, filename_out + ".tar")
+        if remove_dir:
+            remove(filename_out)
 
 
 def save_leads(stations, st, start_date, dt, leads, rpath="./skill/"):
