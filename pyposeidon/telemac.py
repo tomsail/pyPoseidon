@@ -1159,6 +1159,7 @@ class Telemac:
         y_units = "degrees_north"
 
         path = get_value(self, kwargs, "rpath", "./telemac/")
+        res_min = get_value(self, kwargs, "res_min", 0.5)
         filename = get_value(self, kwargs, "filename", "stations.zarr")
         filename2d = get_value(self, kwargs, "filename2d", "out_2D.zarr")
         chunk = get_value(self, kwargs, "chunk", None)
@@ -1166,48 +1167,12 @@ class Telemac:
         logger.info("get combined 2D netcdf files \n")
         # check for new IO output
         res = os.path.join(path, "results_2D.slf")
-        slf = Selafin(res)
-
-        year, month, day, hour, minute, seconds, tz = slf.datetime
-        hour = "{0:05.2f}".format(float(hour)).replace(".", ":")
-        tz = "{0:+06.2f}".format(float(0)).replace(".", "")
-        date = "{}-{}-{} {} {}".format(year, month, day, hour, tz)
-        # set the start timestamp
-        sdate = pd.to_datetime(date, utc=True, format="%Y-%m-%d %H:%M %z")
-        # Normalize Time Data
-        sdate = pd.to_datetime(date, utc=True, format="%Y-%m-%d %H:%M %z")
-        times = pd.to_datetime(slf.tags["times"], unit="s", origin=sdate.tz_convert(None))
-        if isinstance(self.mesh, str):
-            if self.mesh == "tri2d" or self.mesh == "r2d":
-                self.mesh = pmesh.set(type=self.mesh, mesh_file=self.mesh_file)
-        # Initialize first the xr.Dataset
-        xc = xr.Dataset(
-            {
-                "longitude": ("nodes", slf.meshx),
-                "latitude": ("nodes", slf.meshy),
-                "face_node_connectivity": (("elements", "face_nodes"), slf.ikle2),
-                "node": ("bnodes", self.mesh.Dataset.node.values),
-                "type": ("bnodes", self.mesh.Dataset.type.values),
-                "id": ("bnodes", self.mesh.Dataset.id.values),
-                "depth": ("nodes", self.mesh.Dataset.depth.values),
-            },
-            coords={
-                "bnodes": np.arange(len(self.mesh.Dataset.node.values)),
-                "time": times,
-                "nodes": np.arange(len(slf.meshx)),
-            },
-        )
-
-        # Normalize Variable Names and Add Model Results
-        varnames_n = normalize_varnames(slf.varnames)
-        cube = np.zeros((len(times), len(varnames_n), len(slf.meshx)))
-
-        for it, t_ in enumerate(slf.tags["times"]):
-            # Get model results for this time step
-            cube[it, :, :] = slf.get_values(it)  # This should return a 2D array of shape (n_var, nodes)
-        # reindex
-        for idx, varname in enumerate(varnames_n):
-            xc = xc.assign({varname: (("time", "nodes"), cube[:, idx, :])})
+        xc = xr.open_dataset(res, engine="selafin")
+        dic = {}
+        varsn = normalize_varnames(xc.variables)
+        for var, varn in zip(xc.variables, varsn):
+            dic.update({var: varn})
+        xc = xc.rename(dic)
 
         # set Attrs
         xc.longitude.attrs = {
@@ -1233,15 +1198,9 @@ class Telemac:
                 "location": "node",
             }
 
-        xc.face_node_connectivity.attrs = {
-            "long_name": "Horizontal Element Table",
-            "cf_role": "face_node_connectivity",
-            "start_index": 0,
-        }
-
         xc.time.attrs = {
             "long_name": "Time",
-            "base_date": date,
+            "base_date": pd.Timestamp(*xc.attrs["date_start"]).strftime("%Y-%m-%d %H:%M:%S"),
             "standard_name": "time",
         }
 
@@ -1258,35 +1217,31 @@ class Telemac:
         os.makedirs(os.path.join(path, "outputs"), exist_ok=True)
         out2d = os.path.join(path, "outputs", filename2d)
         remove(out2d)
-        export_xarray(xc, out2d, chunk=chunk)
+        export_xarray(xc, out2d, chunk=chunk, remove_dir=True)
+        remove(res)
 
         if self.monitor:
-            logger.info("export observations nc file\n")
-            # Normalize Variable Names and Add Model Results
-            varnames_n = normalize_varnames(slf.varnames)
-            cube = np.zeros((len(times), len(varnames_n), len(self.stations_mesh_id["gindex"])))
+            logger.info("export observations file\n")
             if isinstance(self.stations_mesh_id, dict):
                 stations = pd.DataFrame(self.stations_mesh_id)
             elif isinstance(self.stations_mesh_id, pd.DataFrame):
                 stations = self.stations_mesh_id
-            for it, t_ in enumerate(slf.tags["times"]):
-                # Get model results for this time step
-                data = slf.get_values(it)  # This should return a 2D array of shape (n_var, nodes)
-                for i, idx in enumerate(stations["gindex"]):
-                    idx = int(idx)
-                    for var in range(len(varnames_n)):
-                        if var >= data.shape[0]:
-                            raise IndexError(f"Variable index {var} out of bounds for data with shape {data.shape}")
-                        if idx >= data.shape[1]:
-                            raise IndexError(f"Index {idx} out of bounds for data with shape {data.shape}")
-                        cube[it, var, i] = data[var, idx]
+            idx = stations["gindex"]
+            # xy = np.column_stack((stations.longitude, stations.latitude))
+            # print('resmin', res_min)
+            # nodes = closest_n_points(xy, 1, np.column_stack((xc.x, xc.y)), res_min).flatten()
+            # valid_nodes = nodes[nodes != -1]
+            # valid_seaset_ids = catalog.loc[nodes != -1]['seaset_id'].values
 
-            ds = xr.Dataset(
-                {
-                    "elev": (("time", "variable", "id"), cube),  # replace with your actual data
-                },
-                coords={"time": times, "id": stations["provider_id"], "variable": varnames_n},
-            )
+            data_vars = {"elev": (("time", "seaset_id"), xc.elev.isel(node=idx).values)}
+            coords = {
+                "time": xc["time"],
+                "seaset_id": idx,
+                "lon": ("seaset_id", xc.longitude.isel(node=idx).values),
+                "lat": ("seaset_id", xc.latitude.isel(node=idx).values),
+            }
+
+            ds = xr.Dataset(data_vars=data_vars, coords=coords)
 
             out_obs = os.path.join(path, "outputs", filename)
             remove(out_obs)
