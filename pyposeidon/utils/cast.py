@@ -541,8 +541,12 @@ class TelemacCast:
         info["params"]["start_date"] = self.sdate
         info["params"]["time_frame"] = self.end_date - self.sdate
         info["params"]["end_date"] = self.end_date
-        info["params"]["datestart"] = self.start.strftime("%Y;%m;%d")
-        info["params"]["timestart"] = self.sdate.strftime("%H;%M;%S")
+        if info["tag"] == "telemac2d":
+            info["params"]["datestart"] = self.start.strftime("%Y;%m;%d")
+            info["params"]["timestart"] = self.start.strftime("%H;%M;%S")
+        elif info["tag"] == "tomawac":
+            info["params"]["datestart"] = self.start.strftime("%Y%m%d%H%M")
+
         info["params"]["duration"] = pd.to_timedelta(info["params"]["time_frame"]).total_seconds()
         info["rpath"] = rpath
 
