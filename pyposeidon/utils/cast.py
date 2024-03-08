@@ -536,6 +536,9 @@ class TelemacCast:
 
         info["config_file"] = os.path.join(ppath, self.tag + "_model.json")
 
+        self.start = info["start_date"] # TO FIX!
+        # THIS SHOULD NOT BE IMPLEMENTED THIS WAY
+
         # update the properties
         info["params"]["rdate"] = self.sdate
         info["params"]["start_date"] = self.sdate
