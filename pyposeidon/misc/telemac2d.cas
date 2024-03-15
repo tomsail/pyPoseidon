@@ -12,6 +12,8 @@ BOUNDARY CONDITIONS FILE  = '{{cli_file}}'
 RESULTS FILE =  '{{out_2D_file}}'
 BINARY ATMOSPHERIC DATA FILE = 
 '{{inp_wind_file}}'
+{% if monitor %}TIME SERIES FILE 1             = '{{out_1D_file}}'
+TIME SERIES COORDINATES FILE 1 = '{{station_coords}}'{% endif %}
 /CHECKING THE MESH = YES
 /PARALLEL PROCESSORS = {{ ncsize }}
 /
@@ -35,8 +37,7 @@ MASS-BALANCE = {{ 'YES' if mass_balance else 'NO' }}
 /----------------------------------------------
 /
 COMPUTATION CONTINUED = {{ 'YES' if computation_continued else 'NO' }} /Determines whether the computation under way is independent result or is following an earlier result
-{% if computation_continued %}
-PREVIOUS COMPUTATION FILE = {{ previous_computation_file }}
+{% if computation_continued %}PREVIOUS COMPUTATION FILE = {{ previous_computation_file }}
 PREVIOUS COMPUTATION FILE FORMAT = 'SERAFIND'
 {% else %}
 INITIAL CONDITIONS  = '{{initial_conditions}}'     /ZERO ELEVATION,
@@ -45,14 +46,12 @@ INITIAL CONDITIONS  = '{{initial_conditions}}'     /ZERO ELEVATION,
 /                                                /ZERO DEPTH, 
 /                                                /CONSTANT DEPTH (together with INITIAL DEPTH), 
 /                                                /SPECIAL,  
-/                                                /TPXO SATELLITE ALTIMETRY
-{% endif %}
+/                                                /TPXO SATELLITE ALTIMETRY{% endif %}
 /
 /---------------------------------------------------------------------
 /  CREATE RESTART CONDITIONS
 /---------------------------------------------------------------------
-{% if hotstart %}
-RESTART MODE = YES
+{% if hotstart %}RESTART MODE = YES
 RESTART FILE = {{ restart_file }}
 /RECORD NUMBER IN RESTART FILE = {{ restart_tstep }}
 RESTART FILE FORMAT = 'SERAFIND' {% endif %}
@@ -108,7 +107,7 @@ OPTION FOR WIND                  = {{wind_type}} /'1="constant in time and space
 /                                                /'3="variable in time and space given by formated file"'
 /COEFFICIENT OF WIND INFLUENCE       = {{wind_coef}}      /Sets the value of the wind driving coefficient
 THRESHOLD DEPTH FOR WIND            = {{depth_threshold_wind}} {% endif %}
-
+/
 /----------------------------------------------
 /  TSUNAMI 
 /----------------------------------------------

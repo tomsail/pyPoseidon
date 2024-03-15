@@ -4,6 +4,8 @@
     "cli_file": "geo.cli",
     "out_2D_file": "results_2D.slf",
     "out_1D_file": "results_1D.slf",
+    "station_coords": "station.in",
+    "monitor": false,
     "inp_wind_file": "input_wind.slf",
     "hotstart": true,
     "restart_file": "restart_2D.slf",

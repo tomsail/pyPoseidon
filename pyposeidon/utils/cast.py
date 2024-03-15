@@ -536,7 +536,7 @@ class TelemacCast:
 
         info["config_file"] = os.path.join(ppath, self.tag + "_model.json")
 
-        self.start = pd.Timestamp(info["start_date"]) # TO FIX!
+        self.start = pd.Timestamp(info["start_date"])  # TO FIX!
         # THIS SHOULD NOT BE IMPLEMENTED THIS WAY
 
         # update the properties

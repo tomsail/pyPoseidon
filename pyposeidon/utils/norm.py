@@ -107,11 +107,13 @@ def normalize_column_names(dataframe: pd.DataFrame) -> pd.DataFrame:
     return dataframe
 
 
-def normalize_varnames(varnames, mapping=TEL_MAP_SHORT2):
+def normalize_varnames(varnames, mapping=TEL_MAP_SHORT2, mapping1=TEL_MAP_SHORT):
     normalized_names = []
     for v in varnames:
         if v in mapping:
             normalized_names.append(mapping[v])
+        elif v in mapping1:
+            normalized_names.append(mapping1[v])
         else:
             normalized_names.append(v.strip().lower())
     return normalized_names

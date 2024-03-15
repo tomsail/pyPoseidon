@@ -99,6 +99,23 @@ def calculate_time_step_hourly_multiple(resolution, min_water_depth=0.1, courant
 
 
 # Helper functions
+def df_to_gpd(df, x: str = "longitude", y: str = "latitude"):
+    gpdf = gp.GeoDataFrame(
+        df,
+        geometry=gp.points_from_xy(
+            df[x],
+            df[y],
+        ),
+        crs="EPSG:4326",
+    )
+    return gpdf
+
+
+def xy_to_ll(x, y):
+    gpdf = gp.GeoDataFrame(geometry=gp.points_from_xy(x, y), crs="EPSG:3857").to_crs("EPSG:4326")
+    return gpdf.geometry.x, gpdf.geometry.y
+
+
 def is_ccw(tris, meshx, meshy):
     x1, x2, x3 = meshx[tris].T
     y1, y2, y3 = meshy[tris].T
@@ -565,6 +582,9 @@ class Telemac:
             hotout = int((self.restart - self.rdate).total_seconds() / (params["tstep"] * params["tstep_graph"]))
             params["hotstart"] = True
             params["restart_tstep"] = hotout
+
+        if self.monitor:
+            params["monitor"] = True
 
         # update
         if dic:
@@ -1173,6 +1193,7 @@ class Telemac:
         for var, varn in zip(xc.variables, varsn):
             dic.update({var: varn})
         xc = xc.rename(dic)
+        xc["face_nodes"] = xr.Variable(("face", "max_no_vertices"), np.array(xc.attrs["ikle2"]) - 1)
 
         # set Attrs
         xc.longitude.attrs = {
@@ -1226,23 +1247,39 @@ class Telemac:
                 stations = pd.DataFrame(self.stations_mesh_id)
             elif isinstance(self.stations_mesh_id, pd.DataFrame):
                 stations = self.stations_mesh_id
-            idx = stations["gindex"]
-            # xy = np.column_stack((stations.longitude, stations.latitude))
-            # print('resmin', res_min)
-            # nodes = closest_n_points(xy, 1, np.column_stack((xc.x, xc.y)), res_min).flatten()
-            # valid_nodes = nodes[nodes != -1]
-            # valid_seaset_ids = catalog.loc[nodes != -1]['seaset_id'].values
+            # idx = stations["gindex"] # not need for now
+            res_1D = Selafin(os.path.join(path, "results_1D.slf"))
+            t0 = res_1D.datetime
+            t0pd = pd.Timestamp(t0[0], t0[1], t0[2], t0[3], t0[4], t0[5])
+            times = [t0pd + pd.to_timedelta(t_, unit="s") for t_ in res_1D.tags["times"]]
 
-            data_vars = {"elev": (("time", "seaset_id"), xc.elev.isel(node=idx).values)}
+            varsn = normalize_varnames(res_1D.varnames)
+            data_vars = {}
+
+            # waiting for the xarray Serafin fix
+            cube = np.zeros((len(times), len(res_1D.varnames), len(res_1D.meshx)))
+            for it, t_ in enumerate(times):
+                cube[it, :, :] = res_1D.get_values(it)
+
+            for var, vartel in zip(varsn, res_1D.varnames):
+                i_v = res_1D.varnames.index(vartel)
+                data_vars.update({var: (("time", "seaset_id"), cube[:, i_v, :])})
+
+            mapping = []
+            for ii in range(len(res_1D.ikle2.T[0])):
+                id = res_1D.ikle2.T[0][ii]
+                mapping.append(int(stations.iloc[id].seaset_id))
+            # bug in TELEMAC coord: CONVERT BACK FROM MERCATOR
+            x2, y2 = xy_to_ll(res_1D.meshx, res_1D.meshy)
+            # bug #2 res_1D.meshx does not have the same length as stations
+            # hence why we use only res_1D for the the results
             coords = {
-                "time": xc["time"],
-                "seaset_id": idx,
-                "lon": ("seaset_id", xc.longitude.isel(node=idx).values),
-                "lat": ("seaset_id", xc.latitude.isel(node=idx).values),
+                "time": times,
+                "seaset_id": mapping,
+                "longitude": ("seaset_id", x2),
+                "latitude": ("seaset_id", y2),
             }
-
             ds = xr.Dataset(data_vars=data_vars, coords=coords)
-
             out_obs = os.path.join(path, "outputs", filename)
             remove(out_obs)
             export_xarray(ds, out_obs, chunk=chunk)
@@ -1253,10 +1290,11 @@ class Telemac:
         path = get_value(self, kwargs, "rpath", "./telemac/")
         nspool_sta = get_value(self, kwargs, "nspool_sta", 1)
         tg_database = get_value(self, kwargs, "obs", None)
+        max_dist = get_value(self, kwargs, "max_dist", np.inf)
 
         if tg_database:
             logger.info("get stations from {}\n".format(tg_database))
-            tg = gp.read_file(tg_database)
+            tg = pd.read_csv(tg_database, index_col=0).reset_index(drop=True)
         else:
             logger.info("get stations using searvey\n")
             geometry = get_value(self, kwargs, "geometry", None)
@@ -1295,7 +1333,7 @@ class Telemac:
         )
 
         coords = np.array([tgn.longitude.values, tgn.latitude.values]).T
-        cp = closest_n_points(coords, 1, gpoints).T[0]
+        cp, mask = closest_n_points(coords, 1, gpoints, max_dist)
         mesh_index = cp
         stations = gpoints[cp]
 
@@ -1306,26 +1344,30 @@ class Telemac:
         stations["z"] = 0
         stations.index += 1
         stations["gindex"] = mesh_index
-        try:
-            stations["provider_id"] = tgn.location.values
-            stations["provider"] = "ioc"
-            stations["longitude"] = tgn.longitude.values
-            stations["latitude"] = tgn.latitude.values
-        except:
-            pass
+        stations["unique_id"] = stations.index
+        stations["seaset_id"] = tgn.seaset_id.values[mask]
+        stations["longitude"] = tgn.longitude.values[mask]
+        stations["latitude"] = tgn.latitude.values[mask]
+        # convert to MERCATOR coordinates
+        # dirty fix (this needs to be fixed in TELEMAC directly)
+        gdf_mercator = df_to_gpd(stations).to_crs("EPSG:3857")
+        stations["x"] = gdf_mercator.geometry.x.astype(int)
+        stations["y"] = gdf_mercator.geometry.y.astype(int)
 
         self.stations_mesh_id = stations
 
-        logger.info("write out stations.in file \n")
+        logger.info("write out stations.csv file \n")
+        tgn[mask].to_csv(os.path.join(path, "stations.csv"), index=False)
 
+        logger.info("write out stations.in file \n")
         # output to file
         with open(os.path.join(path, "station.in"), "w") as f:
             f.write(f"1 {stations.shape[0]}\n")  # 1st line: number of periods and number of points
             f.write(
                 f"{0} {int(self.params['duration'])} {self.params['tstep']}\n"
             )  # 2nd line: period 1: start time, end time and interval (in seconds)
-            stations.loc[:, ["SCHISM_hgrid_node_x", "SCHISM_hgrid_node_y", "gindex"]].to_csv(
-                f, header=None, sep=" "
+            stations.loc[:, ["x", "y", "unique_id", "seaset_id"]].to_csv(
+                f, header=None, sep=" ", index=False
             )  # 3rd-10th line: output points; x coordinate, y coordinate, station number, and station name
 
     def get_station_sim_data(self, **kwargs):
