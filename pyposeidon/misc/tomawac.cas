@@ -4,13 +4,18 @@ GEOMETRY FILE : '{{geo_file}}'
 BOUNDARY CONDITIONS FILE : '{{cli_file}}'
 BINARY WINDS FILE : '{{inp_wind_file}}'
 WINDS FILE FORMAT : {{wind_file_format}}
+{% if hotstart %}
+GLOBAL RESULT FILE = {{ restart_file }}
+{% endif %}
 /------------------------------------------------------------------/
 2D RESULTS FILE : '{{out_2D_file}}'
 2D RESULTS FILE FORMAT : 'SERAFIN'
-/PUNCTUAL RESULTS FILE : '{{out_pt_file}}'
+{% if monitor %}TIME SERIES FILE             = '{{out_1D_file}}'
+TIME SERIES COORDINATES FILE = '{{station_coords}}'{% endif %}
+/------------------------------------------------------------------/
 /			COMPUTATION_ENVIRONMENT
 /------------------------------------------------------------------/
-TITLE : {{title}}
+TITLE : '{{title}}'
 PERIOD FOR LISTING PRINTOUTS : {{tstep_list}}
 PERIOD FOR GRAPHIC PRINTOUTS : {{tstep_graph}}
 VARIABLES FOR 2D GRAPHIC PRINTOUTS : HM0;DMOY;TMOY;TPD;SPD;TPR8
@@ -20,12 +25,10 @@ VARIABLES FOR 2D GRAPHIC PRINTOUTS : HM0;DMOY;TMOY;TPD;SPD;TPR8
 /------------------------------------------------------------------/
 NAMES OF VARIABLES : 'SURFACE PRESSUREUI              '; 
 'AIR TEMPERATURE DEGREES         '; 
-'WIND VELOCITY U M/S             '; 
-'WIND VELOCITY V M/S             '
-
+'WINDX           M/S             '; 
+'WINDY           M/S             '
 NUMBER OF TIME STEP : {{nb_tsteps}}
-TIME STEP : {{time_inc}}
-NEXT COMPUTATION : {{next_computation}}
+TIME STEP : {{tstep}}
 DATE OF COMPUTATION BEGINNING : {{datestart}}
 
 /***** DISCRETISATION *****
@@ -78,4 +81,6 @@ NON-LINEAR TRANSFERS BETWEEN FREQUENCIES : {{nonlinear_transfers_freq}}
 /			INITIAL_CONDITIONS
 /------------------------------------------------------------------/
 /
-{% if hotstart %}PREVIOUS COMPUTATION FILE : '{{inp_ini_file}}' {% endif %}
+{% if computation_continued %}
+PREVIOUS COMPUTATION FILE = {{ previous_computation_file }}
+{% endif %}

@@ -1,5 +1,5 @@
 """
-Schism model of pyposeidon. It controls the creation, execution & output  of a complete simulation based on SCHISM.
+TELEMAC model of pyposeidon. It controls the creation, execution & output  of a complete simulation based on SCHISM.
 
 """
 # Copyright 2018 European Union
@@ -84,7 +84,7 @@ def calculate_time_step_hourly_multiple(resolution, min_water_depth=0.1, courant
     Calculate the maximum allowable time step for a shallow water equation model
     based on the CFL condition, rounded to the closest divisor of an hour.
 
-    :param resolution: Spatial resolution (Δx) in meters.
+    :param resolution: Spatial resolution (Δx) in meters
     :param min_water_depth: Minimum water depth (h_min) in meters. Default is 1 meter.
     :param courant_number: Courant number (C), typically less than 1 for explicit schemes. Can be higher for implicit schemes.
     :return: Maximum allowable time step (Δt) in seconds, rounded to the closest divisor of an hour.
@@ -913,16 +913,22 @@ class Telemac:
             logger.warning("mpirun is not installed, ending.. \n")
             return
 
-        # Creation of the instance Telemac2d
-        study = Telemac2d(cas_file, user_fortran=None, comm=comm, stdout=0, recompile=True)
+        if self.tag == "telemac2d":
+            # Creation of the instance Telemac2d
+            study = Telemac2d(cas_file, user_fortran=None, comm=comm, stdout=0, recompile=True)
+        elif self.tag == "tomawac":
+            study = Tomawac(cas_file, user_fortran=None, comm=comm, stdout=0, recompile=True)
+        else:
+            raise ValueError("this module", self.tag, "is not implemented yet!")
 
         # Testing construction of variable list
         _ = study.variables
 
         study.set_case()
-        # Initialization
+        if self.tag == "tomawac":
+            study.set("MODEL.RESULTFILE", "results_2D.slf")
+        # Initalization
         study.init_state_default()
-        # Run all time steps
         ntimesteps = study.get("MODEL.NTIMESTEPS")
         pbar = ProgressBar(ntimesteps)
         for it in range(ntimesteps):
