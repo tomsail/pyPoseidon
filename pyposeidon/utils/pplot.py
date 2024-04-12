@@ -580,6 +580,11 @@ class pplot(object):
             bls.plot(ax=ax, markersize=10, marker="x")
             del kwargs["bnodes"]
 
+        title = kwargs.get("title", "Mesh plot")
+        if title != "Mesh plot":
+            del kwargs["title"]
+        ax.set_title(title, pad=30)
+
         ax.set_aspect("equal")
         g = plt.triplot(x, y, tri3, "go-", lw=lw, markersize=markersize, **kwargs)  # transform=ccrs.PlateCarree() )
 
@@ -590,8 +595,6 @@ class pplot(object):
             y_ = [y[element[i]] for i in range(len(element))]
             plt.fill(x_, y_, edgecolor="green", fill=False, lw=lw)
 
-        title = kwargs.get("title", "Mesh plot")
-        ax.set_title(title, pad=30)
         ax.set_xlabel("Longitude (degrees)")
         ax.set_ylabel("Latitude (degrees)")
 

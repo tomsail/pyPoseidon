@@ -52,3 +52,6 @@ dependencies:
   - spatialpandas
   - tqdm
   - xarray
+  - cgal
+  - opentelemac
+  - openmpi

@@ -489,9 +489,9 @@ class Telemac:
             logger.warning("model not set properly, No end_date\n")
             # ---------------------------------------------------------------------
 
-        self.tstep = kwargs.get("tstep", None)
+        self.tstep = kwargs.get("dt", None)
 
-        self.tag = tel_module
+        self.module = tel_module
         self.tide = kwargs.get("tide", False)
         tpxo_ = kwargs.get("tpxo_source", None)
         if tpxo_ is not None:
@@ -514,6 +514,7 @@ class Telemac:
         self.ncsize = get_value(self, kwargs, "ncsize", 1)
         # convert -180/180 to 0-360
         self.input360 = get_value(self, kwargs, "meteo_input360", False)
+        self.meteo = None
 
         for attr, value in kwargs.items():
             if not hasattr(self, attr):
@@ -534,43 +535,45 @@ class Telemac:
             # ---------------------------------------------------------------------
         else:
             # ---------------------------------------------------------------------
-            logger.info("using default " + self.tag + " json config file ...\n")
+            logger.info("using default " + self.module + " json config file ...\n")
             # ---------------------------------------------------------------------
 
-            config_file = os.path.join(DATA_PATH, self.tag + ".json")
+            config_file = os.path.join(DATA_PATH, self.module + ".json")
 
         # Load the parameters from the JSON file
         with open(config_file, "r") as json_file:
             config = json.load(json_file)
             params = config["params"]
 
-        # update key values
-        if "telemac" in self.tag:
-            params["datestart"] = self.start_date.strftime("%Y;%m;%d")
-            params["timestart"] = self.start_date.strftime("%H;%M;%S")
-        elif "tomawac" in self.tag:
-            params["datestart"] = self.start_date.strftime("%Y%m%d%H%M")
-
-        if hasattr(self, "time_frame"):
-            duration = pd.to_timedelta(self.time_frame).total_seconds()
-        else:
-            self.time_frame = self.end_date - self.start_date
-            duration = self.time_frame.total_seconds()
-
-        params["duration"] = duration
-        # export grid data every hour
         res_min = get_value(self, kwargs, "resolution_min", 0.5)
+        # update key values
+        if self.start_date is not None:
+            if "telemac" in self.module:
+                params["datestart"] = self.start_date.strftime("%Y;%m;%d")
+                params["timestart"] = self.start_date.strftime("%H;%M;%S")
+            elif "tomawac" in self.module:
+                params["datestart"] = self.start_date.strftime("%Y%m%d%H%M")
+            else:
+                logger.info(f"self.start_date not set for {self.module} yet\n")
 
-        if self.tstep:
-            tstep = self.tstep
-        else:
-            tstep = calculate_time_step_hourly_multiple(res_min)
-        params["tstep"] = tstep
+            if hasattr(self, "time_frame"):
+                duration = pd.to_timedelta(self.time_frame).total_seconds()
+            else:
+                self.time_frame = self.end_date - self.start_date
+                duration = self.time_frame.total_seconds()
 
-        params["nb_tsteps"] = int(duration / tstep)
-        params["tstep_graph"] = int(3600 / tstep)
-        params["tstep_list"] = int(3600 / tstep)
-        params["ncsize"] = self.ncsize
+            params["duration"] = duration
+
+            # export grid data every hour
+            if self.tstep:
+                tstep = self.tstep
+            else:
+                tstep = calculate_time_step_hourly_multiple(res_min)
+            params["tstep"] = tstep
+            params["nb_tsteps"] = int(duration / tstep)
+            params["tstep_graph"] = int(3600 / tstep)
+            params["tstep_list"] = int(3600 / tstep)
+            params["ncsize"] = self.ncsize
 
         # tide
         if self.tide:
@@ -599,10 +602,10 @@ class Telemac:
         if output:
             # save params
             # ---------------------------------------------------------------------
-            logger.info("output " + self.tag + " CAS file ...\n")
+            logger.info("output " + self.module + " CAS file ...\n")
             # ---------------------------------------------------------------------
             path = get_value(self, kwargs, "rpath", "./telemac/")
-            write_cas(path, self.tag, params)
+            write_cas(path, self.module, params)
 
     # ============================================================================================
     # METEO
@@ -729,26 +732,26 @@ class Telemac:
                     else:
                         self.dem.adjust(coastline, **kwargs)
                 try:
-                    try:
-                        bat = -self.dem.Dataset.fval.values.astype(float)  # minus for the hydro run
-                        if np.isinf(bat).sum() != 0:
-                            raise Exception("Bathymetry contains Infs")
-                        if np.isnan(bat).sum() != 0:
-                            raise Exception("Bathymetry contains NaNs")
-                            logger.warning("Bathymetric values fval contain NaNs, using ival values ..\n")
-
-                    except:
-                        bat = -self.dem.Dataset.ival.values.astype(float)  # minus for the hydro run
-
-                    self.mesh.Dataset.depth.loc[: bat.size] = bat
-
-                    logger.info("updating bathymetry ..\n")
-
+                    self.get_depth_from_dem()
                 except AttributeError as e:
                     logger.info("Keeping bathymetry in hgrid.gr3 due to {}\n".format(e))
-
             else:
                 logger.info("dem from mesh file\n")
+
+    def get_depth_from_dem(self):
+        try:
+            logger.info("Dem already adjusted\n")
+            bat = -self.dem.Dataset.fval.values.astype(float)  # minus for hydro run
+            if np.isinf(bat).sum() != 0:
+                raise Exception("Bathymetry contains Infs")
+            if np.isnan(bat).sum() != 0:
+                raise Exception("Bathymetry contains NaNs")
+
+        except:
+            bat = -self.dem.Dataset.ival.values.astype(float)  # minus for hydro run
+
+        self.mesh.Dataset.depth.loc[: bat.size] = bat
+        logger.info("updating bathymetry ..\n")
 
     @staticmethod
     def mesh_to_slf(
@@ -806,7 +809,7 @@ class Telemac:
         # write mesh
         chezy = get_value(self, kwargs, "chezy", None)
         manning = get_value(self, kwargs, "manning", 0.027)
-        self.mesh_to_slf(X, Y, Z, IKLE2, outpath, self.tag, chezy, manning, friction_type)
+        self.mesh_to_slf(X, Y, Z, IKLE2, outpath, self.module, chezy, manning, friction_type)
 
     # ============================================================================================
     # EXECUTION
@@ -839,8 +842,13 @@ class Telemac:
             self.lat_max = self.mesh.Dataset.SCHISM_hgrid_node_y.values.max()
 
         # get bathymetry
-        if self.mesh.Dataset is not None:
+        if len(self.mesh.Dataset.depth) == len(self.mesh.Dataset.SCHISM_hgrid_node_y):
+            logger.info("found bathy in mesh file\n")
+            self.mesh.Dataset.depth.values *= -1  # minus for hydro run
+        elif self.mesh.Dataset is not None:
             self.bath(**kwargs)
+        else:
+            raise ValueError("No bathymetry found")
 
         # get meteo
         if self.atm:
@@ -854,36 +862,36 @@ class Telemac:
 
     def output(self, **kwargs):
         path = get_value(self, kwargs, "rpath", "./telemac/")
-        flag = get_value(self, kwargs, "update", ["all"])
-        split_by = get_value(self, kwargs, "meteo_split_by", None)
+        global_ = get_value(self, kwargs, "global", True)
 
         if not os.path.exists(path):
             os.makedirs(path)
 
         # Mesh related files
         if self.mesh.Dataset is not None:
-            # WRITE GEO FILE
             try:
-                bat = self.dem.Dataset.fval.values.astype(float)  # minus for the hydro run
-                if np.isnan(bat).sum() != 0:
-                    raise Exception("Bathymetry contains NaNs")
-                    logger.warning("Bathymetric values fval contain NaNs, using ival values ..\n")
-
-            except:
-                bat = self.dem.Dataset.ival.values.astype(float)  # minus for the hydro run
-            self.mesh.Dataset.depth.loc[: bat.size] = bat
+                self.get_depth_from_dem()
+            except AttributeError as e:
+                logger.info("Keeping bathymetry from hgrid.gr3 ..\n")
 
             logger.info("saving geometry file.. ")
             geo = os.path.join(path, "geo.slf")
-            self.to_slf(geo, global_=True)
+            self.to_slf(geo, global_=global_)
+            self.mesh.to_file(filename=os.path.join(path, "hgrid.gr3"))
             write_netcdf(self.mesh.Dataset, geo)
 
             # WRITE METEO FILE
             logger.info("saving meteo file.. ")
             meteo = os.path.join(path, "input_wind.slf")
-            self.atm = write_meteo(
-                meteo, geo, self.meteo.Dataset, gtype=self.gtype, ttype=self.ttype, input360=self.input360
-            )
+            if isinstance(self.meteo, list):
+                self.meteo = pmeteo.Meteo(self.meteo_source)
+            else:
+                pass
+
+            if self.meteo:
+                self.atm = write_meteo(
+                    meteo, geo, self.meteo.Dataset, gtype=self.gtype, ttype=self.ttype, input360=self.input360
+                )
 
             # WRITE BOUNDARY FILE
             logger.info("saving boundary file.. ")
@@ -892,7 +900,7 @@ class Telemac:
 
             # WRITE CAS FILE
             logger.info("saving CAS file.. ")
-            write_cas(path, self.tag, self.params)
+            write_cas(path, self.module, self.params)
 
         # ---------------------------------------------------------------------
         logger.info("output done\n")
@@ -907,25 +915,25 @@ class Telemac:
         # ---------------------------------------------------------------------
         comm = MPI.COMM_WORLD
 
-        cas_file = self.tag + ".cas"
+        cas_file = self.module + ".cas"
         os.chdir(calc_dir)
         if not tools.is_mpirun_installed():
             logger.warning("mpirun is not installed, ending.. \n")
             return
 
-        if self.tag == "telemac2d":
+        if self.module == "telemac2d":
             # Creation of the instance Telemac2d
             study = Telemac2d(cas_file, user_fortran=None, comm=comm, stdout=0, recompile=True)
-        elif self.tag == "tomawac":
+        elif self.module == "tomawac":
             study = Tomawac(cas_file, user_fortran=None, comm=comm, stdout=0, recompile=True)
         else:
-            raise ValueError("this module", self.tag, "is not implemented yet!")
+            raise ValueError("this module", self.module, "is not implemented yet!")
 
         # Testing construction of variable list
         _ = study.variables
 
         study.set_case()
-        if self.tag == "tomawac":
+        if self.module == "tomawac":
             study.set("MODEL.RESULTFILE", "results_2D.slf")
         # Initalization
         study.init_state_default()
@@ -989,7 +997,7 @@ class Telemac:
             if isinstance(value, gp.GeoDataFrame):
                 dic[attr] = value.to_json()
 
-        filename = os.path.join(path, f"{self.tag}_model.json")
+        filename = os.path.join(path, f"{self.module}_model.json")
         json.dump(dic, open(filename, "w"), indent=4, default=myconverter)
 
     def execute(self, **kwargs):
@@ -1002,7 +1010,7 @@ class Telemac:
 
     def read_folder(self, rfolder, **kwargs):
         self.rpath = rfolder
-        geo = glob.glob(os.path.join(rfolder, "/geo.slf"))
+        geo = glob.glob(os.path.join(rfolder, "geo.slf"))
         cli = glob.glob(os.path.join(rfolder, "/geo.cli"))
         mfiles = glob.glob(os.path.join(rfolder, "/input_wind.slf"))
 
@@ -1083,101 +1091,6 @@ class Telemac:
         logger.info("saving hotstart file\n")
         xdat.to_netcdf(os.path.join(ppath, f"outputs/{hfile}"))
 
-    ## Any variable
-    def combine(self, out, g2l, name):
-        keys = g2l.index.get_level_values(0).unique()
-        r = []
-        for i in range(len(out)):
-            v = out[i].to_pandas()
-            v.index += 1
-            mask = g2l.loc[keys[i], "local"]
-            vm = v.loc[mask]
-            vm.index = g2l.loc[keys[i], "global_n"].values
-            r.append(vm)
-        r = pd.concat(r).sort_index()
-        r.index -= 1
-        r.index.name = name
-        return r
-
-    def combine_(self, var, out, g2l, name):
-        if len(out[0][var].shape) == 3:
-            dd = []
-            for i in range(out[0][var].shape[2]):
-                o = []
-                for j in range(len(out)):
-                    o.append(out[j][var].loc[{out[j][var].dims[2]: i}])
-                r = self.combine(o, g2l, name)
-                dd.append(xr.DataArray(r.values, dims=out[0][var].dims[:2], name=var))
-
-            tr = xr.concat(dd, dim=out[0][var].dims[2])
-            a, b, c = out[0][var].dims
-            tr = tr.transpose(a, b, c)
-            return tr
-
-        elif len(out[0][var].shape) < 3:
-            o = []
-            for j in range(len(out)):
-                o.append(out[j][var])
-            r = self.combine(o, g2l, name)
-            return xr.DataArray(r.values, dims=list(out[0][var].dims), name=var)
-
-    def xcombine(self, tfs):
-        # Create dataset
-        side = []
-        node = []
-        el = []
-        single = []
-
-        for key in tfs[0].variables:
-            if "nSCHISM_hgrid_face" in tfs[0][key].dims:
-                r = self.combine_(key, tfs, self.misc["melems"], "nSCHISM_hgrid_face")
-                el.append(r)
-            elif "nSCHISM_hgrid_node" in tfs[0][key].dims:
-                r = self.combine_(key, tfs, self.misc["mnodes"], "nSCHISM_hgrid_node")
-                node.append(r)
-            elif "nSCHISM_hgrid_edge" in tfs[0][key].dims:
-                r = self.combine_(key, tfs, self.misc["msides"], "nSCHISM_hgrid_edge")
-                side.append(r)
-            elif len(tfs[0][key].dims) == 1:
-                single.append(tfs[0][key])
-
-        side = xr.merge(side)
-        el = xr.merge(el)
-        node = xr.merge(node)
-        single = xr.merge(single)
-
-        # merge
-        return xr.merge([side, el, node, single])
-
-    def tcombine(self, hfiles, sdate, times):
-        xall = []
-        for k in range(times.shape[0]):
-            tfs = []
-            for i in range(len(hfiles)):
-                tfs.append(xr.open_dataset(hfiles[i]).isel(time=k))
-
-            xall.append(self.xcombine(tfs))
-
-        xdat = xr.concat(xall, dim="time")
-        xdat = xdat.assign_coords(time=times)
-
-        return xdat
-
-    # https://stackoverflow.com/questions/41164630/pythonic-way-of-removing-reversed-duplicates-in-list
-    @staticmethod
-    def remove_reversed_duplicates(iterable):
-        # Create a set for already seen elements
-        seen = set()
-        for item in iterable:
-            # Lists are mutable so we need tuples for the set-operations.
-            tup = tuple(item)
-            if tup not in seen:
-                # If the tuple is not in the set append it in REVERSED order.
-                seen.add(tup[::-1])
-                # If you also want to remove normal duplicates uncomment the next line
-                # seen.add(tup)
-                yield item
-
     def results(self, **kwargs):
         lat_coord_standard_name = "latitude"
         lon_coord_standard_name = "longitude"
@@ -1188,6 +1101,7 @@ class Telemac:
         res_min = get_value(self, kwargs, "res_min", 0.5)
         filename = get_value(self, kwargs, "filename", "stations.zarr")
         filename2d = get_value(self, kwargs, "filename2d", "out_2D.zarr")
+        remove_zarr = get_value(self, kwargs, "remove_zarr", True)
         chunk = get_value(self, kwargs, "chunk", None)
 
         logger.info("get combined 2D netcdf files \n")
@@ -1244,8 +1158,7 @@ class Telemac:
         os.makedirs(os.path.join(path, "outputs"), exist_ok=True)
         out2d = os.path.join(path, "outputs", filename2d)
         remove(out2d)
-        export_xarray(xc, out2d, chunk=chunk, remove_dir=True)
-        remove(res)
+        export_xarray(xc, out2d, chunk=chunk, remove_dir=remove_zarr)
 
         if self.monitor:
             logger.info("export observations file\n")
@@ -1288,7 +1201,7 @@ class Telemac:
             ds = xr.Dataset(data_vars=data_vars, coords=coords)
             out_obs = os.path.join(path, "outputs", filename)
             remove(out_obs)
-            export_xarray(ds, out_obs, chunk=chunk)
+            export_xarray(ds, out_obs, chunk=chunk, remove_dir=remove_zarr)
 
         logger.info("done with output netCDF files \n")
 
@@ -1375,56 +1288,6 @@ class Telemac:
             stations.loc[:, ["x", "y", "unique_id", "seaset_id"]].to_csv(
                 f, header=None, sep=" ", index=False
             )  # 3rd-10th line: output points; x coordinate, y coordinate, station number, and station name
-
-    def get_station_sim_data(self, **kwargs):
-        path = get_value(self, kwargs, "rpath", "./schism/")
-
-        # locate the station files
-        sfiles = glob.glob(os.path.join(path, "outputs/staout_*"))
-        sfiles.sort()
-
-        try:
-            # get the station flags
-            flags = pd.read_csv(os.path.join(path, "station.in"), header=None, nrows=1, delim_whitespace=True).T
-        except FileNotFoundError:
-            logger.error("no station.in file present")
-            return
-
-        flags.columns = ["flag"]
-        flags["variable"] = [
-            "elev",
-            "air_pressure",
-            "windx",
-            "windy",
-            "T",
-            "S",
-            "u",
-            "v",
-            "w",
-        ]
-
-        vals = flags[flags.values == 1]  # get the active ones
-
-        dstamp = kwargs.get("dstamp", self.rdate)
-
-        dfs = []
-        for idx in vals.index:
-            obs = np.loadtxt(sfiles[idx])
-            df = pd.DataFrame(obs)
-            df = df.set_index(0)
-            df.index.name = "time"
-            df.columns.name = vals.loc[idx, "variable"]
-            df.index = pd.to_datetime(dstamp) + pd.to_timedelta(df.index, unit="S")
-            pindex = pd.MultiIndex.from_product([df.T.columns, df.T.index])
-
-            r = pd.DataFrame(df.values.flatten(), index=pindex, columns=[vals.loc[idx, "variable"]])
-            r.index.names = ["time", "node"]
-
-            r.index = r.index.set_levels(r.index.levels[1] - 1, level=1)
-
-            dfs.append(r.to_xarray())
-
-        self.station_sim_data = xr.combine_by_coords(dfs)
 
     def get_output_data(self, **kwargs):
         dic = self.__dict__

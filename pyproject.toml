@@ -33,7 +33,7 @@ classifiers = [
 
 [tool.poetry.dependencies]
 inpoly = { git = "https://github.com/dengwirda/inpoly-python.git", rev = "refs/pull/17/merge" }
-oceanmesh = { git = "https://github.com/tomsail/oceanmesh.git"}
+oceanmesh = { git = "https://github.com/tomsail/oceanmesh.git", branch = "stereo-fix" }
 # python = ">=3.10, <3.11"
 python = ">=3.9, <4"
 setuptools = "*"

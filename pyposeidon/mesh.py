@@ -498,7 +498,11 @@ class tri2d:
                 logger.error("file_format must be specified")
                 raise ValueError("file_format must be specified")
             if dim == "3D":
-                x, y, z = to_3d(self.Dataset.SCHISM_hgrid_node_x, self.Dataset.SCHISM_hgrid_node_y, R=6.731e6)
+                if self.Dataset.depth.size > 1:
+                    R = 6.371e6 + self.Dataset.depth.values * 10  # 10 times !!
+                else:
+                    R = 6.371e6
+                x, y, z = to_3d(self.Dataset.SCHISM_hgrid_node_x, self.Dataset.SCHISM_hgrid_node_y, R=R)
                 points = np.column_stack((x, y, z))
             else:
                 points = np.column_stack((self.Dataset.SCHISM_hgrid_node_x, self.Dataset.SCHISM_hgrid_node_y))
