@@ -165,6 +165,9 @@ OPTION FOR THE TREATMENT OF TIDAL FLATS    = {{tidal_flats_option}}
 TREATMENT OF NEGATIVE DEPTHS               = {{negative_depths_treatment}}
 OPTION FOR THE DIFFUSION OF VELOCITIES     = {{diffusion_velocities_option}}
 CONTINUITY CORRECTION                      = {{ 'YES' if continuity_correction else 'NO' }}
+{% if friction_law_boundaries > 0 %}
+LAW OF FRICTION ON LATERAL BOUNDARIES      = {{friction_law_boundaries}}
+ROUGHNESS COEFFICIENT OF BOUNDARIES        = {{friction_coef_boundaries}}{% endif %}
 /
 /----------------------------------------------
 / TRACERS

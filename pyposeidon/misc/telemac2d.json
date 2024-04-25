@@ -32,6 +32,8 @@
     "zone_no": 33,
     "friction_law": 2,
     "friction_coef": 40,
+    "friction_law_boundaries": 0,
+    "friction_coef_boundaries": 40,
     "density_effects": false,
     "coriolis": true,
     "water_density": 1025,

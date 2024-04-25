@@ -1173,14 +1173,14 @@ class Telemac:
         if res_type == "1D":
             # bug in TELEMAC coord: CONVERT BACK FROM MERCATOR (NOT FIXED YET)
             x2, y2 = xy_to_ll(ds.longitude.values, ds.latitude.values)
-            ds = ds.assign_coords({"longitude": x2, "latitude": y2})
+            ds["longitude"] = xr.Variable(("node"), x2)
+            ds["latitude"] = xr.Variable(("node"), y2)
             # bug #2 1D output does not have the same length as station.in
             # no fix provided here: the user needs to do the mapping himself
         return ds
 
     def results(self, **kwargs):
         path = get_value(self, kwargs, "rpath", "./telemac/")
-        res_min = get_value(self, kwargs, "res_min", 0.5)
         filename = get_value(self, kwargs, "filename", "stations.zarr")
         filename2d = get_value(self, kwargs, "filename2d", "out_2D.zarr")
         remove_zarr = get_value(self, kwargs, "remove_zarr", True)
