@@ -851,6 +851,9 @@ class Telemac:
 
         # get bathymetry
         if len(self.mesh.Dataset.depth) == len(self.mesh.Dataset.SCHISM_hgrid_node_y):
+            if np.all(self.mesh.Dataset.depth == 0):
+                logger.info("bathy is set to 0, interpolating dem on mesh")
+                self.bath(**kwargs)
             logger.info("found bathy in mesh file\n")
             self.mesh.Dataset.depth.values *= -1  # minus for hydro run
         elif self.mesh.Dataset is not None:
