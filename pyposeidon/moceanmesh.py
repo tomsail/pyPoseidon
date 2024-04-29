@@ -619,9 +619,7 @@ def make_oceanmesh(df, **kwargs):
     )
     nod = nod.drop_vars("nSCHISM_hgrid_node")
 
-    dep = xr.Dataset({"depth": (["nSCHISM_hgrid_node"], np.zeros(nod.nSCHISM_hgrid_node.shape[0]))})
-
-    gr = xr.merge([nod, dep, els, tbf.to_xarray()])  # total
+    gr = xr.merge([nod, els, tbf.to_xarray()])  # total
 
     return gr
 
@@ -691,9 +689,7 @@ def om_to_xarray(points, cells, stereo_to_ll=True):
     )
     nod = nod.drop_vars("nSCHISM_hgrid_node")
 
-    dep = xr.Dataset({"depth": (["nSCHISM_hgrid_node"], np.zeros(nod.nSCHISM_hgrid_node.shape[0]))})
-
-    return xr.merge([nod, dep, els, tbf.to_xarray()])  # total
+    return xr.merge([nod, els, tbf.to_xarray()])  # total
 
 
 def make_oceanmesh_global(df, **kwargs):
