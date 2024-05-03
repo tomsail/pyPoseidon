@@ -798,7 +798,7 @@ class Telemac:
         X = self.mesh.Dataset.SCHISM_hgrid_node_x.data
         Y = self.mesh.Dataset.SCHISM_hgrid_node_y.data
         # depth
-        Z = self.mesh.Dataset.depth.data
+        Z = - self.mesh.Dataset.depth.data
         nan_mask = np.isnan(Z)
         inf_mask = np.isinf(Z)
         if np.any(nan_mask) or np.any(inf_mask):
@@ -855,7 +855,6 @@ class Telemac:
                 logger.info("bathy is set to 0, interpolating dem on mesh")
                 self.bath(**kwargs)
             logger.info("found bathy in mesh file\n")
-            self.mesh.Dataset.depth.values *= -1  # minus for hydro run
         elif self.mesh.Dataset is not None:
             self.bath(**kwargs)
         else:
