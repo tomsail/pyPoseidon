@@ -1171,14 +1171,12 @@ class Telemac:
         for var, varn in zip(ds.variables, varsn):
             dic.update({var: varn})
         ds = ds.rename(dic)
-        ds["face_nodes"] = xr.Variable(("face", "max_no_vertices"), np.array(ds.attrs["ikle2"]) - 1)
+        ds["triface_nodes"] = xr.Variable(("triface", "three"), np.array(ds.attrs["ikle2"]) - 1)
         if res_type == "1D":
             # bug in TELEMAC coord: CONVERT BACK FROM MERCATOR (NOT FIXED YET)
             x2, y2 = xy_to_ll(ds.longitude.values, ds.latitude.values)
-            ds["longitude"] = xr.Variable(("node"), x2)
-            ds["latitude"] = xr.Variable(("node"), y2)
-            # bug #2 1D output does not have the same length as station.in
-            # no fix provided here: the user needs to do the mapping himself
+            ds["lon"] = xr.Variable(("node"), x2)
+            ds["lat"] = xr.Variable(("node"), y2)
         return ds
 
     def results(self, **kwargs):
