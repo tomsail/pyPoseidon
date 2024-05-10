@@ -1271,14 +1271,14 @@ class Telemac:
         if len(stations) == 0:
             logger.warning("no observations available\n")
 
-        stations = pd.DataFrame(stations, columns=["SCHISM_hgrid_node_x", "SCHISM_hgrid_node_y"])
+        stations = pd.DataFrame(stations, columns=["lon", "lat"])
         stations["z"] = 0
         stations.index += 1
         stations["gindex"] = mesh_index
         stations["unique_id"] = stations.index
         stations["seaset_id"] = tgn.seaset_id.values[mask]
-        stations["longitude"] = tgn.longitude.values[mask]
-        stations["latitude"] = tgn.latitude.values[mask]
+        stations["longitude"] = stations.lon.values[mask]
+        stations["latitude"] = stations.lat.values[mask]
         # convert to MERCATOR coordinates
         # dirty fix (this needs to be fixed in TELEMAC directly)
         gdf_mercator = df_to_gpd(stations).to_crs("EPSG:3857")
