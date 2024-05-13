@@ -212,14 +212,12 @@ def write_meteo(outpath, geo, ds, gtype="grid", ttype="time", input360=False):
 
     data_vars = {}
     var_attrs = {}
-    dtype = np.float64
-    dims = ["time", "node"]
-    shape = (len(ds.time), len(geo.x))
+    node_dim = "node"
+    time_dim = "time"
 
     coords = {
         "x": ("node", geo.x.data),
         "y": ("node", geo.y.data),
-        "time": ds.time,
     }
 
     # Define a mapping from the original variable names to the new ones
@@ -229,22 +227,32 @@ def write_meteo(outpath, geo, ds, gtype="grid", ttype="time", input360=False):
         "msl": ("PATM", "PATM", "PASCAL"),
         "tmp": ("TAIR", "TEMPERATURE", "DEGREES C"),
     }
-    for var in ds.data_vars:
-        if var in var_map:
-            # attributes
-            var_attrs[var_map[var][0]] = (var_map[var][1], var_map[var][2])
-            # data
-            data = np.empty(shape, dtype=dtype)
-            for it, t_ in enumerate(ds.time):
+    final = []
+    for it, t_ in enumerate(ds.time):
+        data_vars = {}
+        var_attrs = {}
+        for var in ds.data_vars:
+            if var in var_map:
+                # Attributes for the variable
+                var_attrs[var_map[var][0]] = (var_map[var][1], var_map[var][2])
+                # Data for the current time step
                 tmp = np.ravel(np.transpose(ds.isel(time=it)[var].values))
-                data[it, :] = interp(tmp, vert, wgts, u_x, g_x)
-            data_vars[var_map[var][0]] = xr.Variable(dims=dims, data=data)
+                data = interp(tmp, vert, wgts, u_x, g_x)
+                data_vars[var_map[var][0]] = (node_dim, data)
 
-    atm = xr.Dataset(data_vars=data_vars, coords=coords)
-    atm.attrs["date_start"] = [t0.year, t0.month, t0.day, t0.hour, t0.minute, t0.second]
-    atm.attrs["ikle2"] = geo.attrs["ikle2"]
-    atm.attrs["variables"] = var_attrs
-    atm.selafin.write(outpath)
+        # Create an xarray.Dataset for the current time step
+        atm_time_step = xr.Dataset(data_vars=data_vars, coords=coords)
+        atm_time_step = atm_time_step.assign_coords({time_dim: t_})
+        atm_time_step = atm_time_step.expand_dims(time_dim)
+
+        # Append the Dataset for the current time step to the list
+        final.append(atm_time_step)
+    xatm = xr.concat(final, dim="time")
+    # Add global attributes after concatenation
+    xatm.attrs["date_start"] = [t0.year, t0.month, t0.day, t0.hour, t0.minute, t0.second]
+    xatm.attrs["ikle2"] = geo.attrs["ikle2"]
+    xatm.attrs["variables"] = {var: attrs for var, attrs in var_attrs.items()}
+    xatm.selafin.write(outpath)
 
 
 def get_boundary_settings(boundary_type, glo_node, bnd_node):
@@ -798,7 +806,7 @@ class Telemac:
         X = self.mesh.Dataset.SCHISM_hgrid_node_x.data
         Y = self.mesh.Dataset.SCHISM_hgrid_node_y.data
         # depth
-        Z = - self.mesh.Dataset.depth.data
+        Z = -self.mesh.Dataset.depth.data
         nan_mask = np.isnan(Z)
         inf_mask = np.isinf(Z)
         if np.any(nan_mask) or np.any(inf_mask):
