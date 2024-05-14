@@ -228,6 +228,8 @@ def write_meteo(outpath, geo, ds, gtype="grid", ttype="time", input360=False):
         "tmp": ("TAIR", "TEMPERATURE", "DEGREES C"),
     }
     final = []
+    logger.info(f"interpolating on {len(ds.time)} time steps")
+    netcdf_path = 'temporary_output.nc'
     for it, t_ in enumerate(ds.time):
         data_vars = {}
         var_attrs = {}
@@ -245,9 +247,11 @@ def write_meteo(outpath, geo, ds, gtype="grid", ttype="time", input360=False):
         atm_time_step = atm_time_step.assign_coords({time_dim: t_})
         atm_time_step = atm_time_step.expand_dims(time_dim)
 
-        # Append the Dataset for the current time step to the list
-        final.append(atm_time_step)
-    xatm = xr.concat(final, dim="time")
+        # Write the Dataset for the current time step to a NetCDF file
+        write_mode = 'w' if it == 0 else 'a'  # Overwrite if first iteration, append otherwise
+        atm_time_step.to_netcdf(netcdf_path, mode=write_mode, format='NETCDF4', unlimited_dims=[time_dim])
+
+    xatm = xr.open_dataset(netcdf_path)
     # Add global attributes after concatenation
     xatm.attrs["date_start"] = [t0.year, t0.month, t0.day, t0.hour, t0.minute, t0.second]
     xatm.attrs["ikle2"] = geo.attrs["ikle2"]
