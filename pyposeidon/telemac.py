@@ -23,6 +23,7 @@ from searvey import ioc
 import shutil
 import typing as T
 from scipy.spatial import Delaunay
+import dask.array as da
 
 # local modules
 import pyposeidon
@@ -181,82 +182,147 @@ def write_netcdf(ds, outpath):
     ds.to_netcdf(fileOut)
 
 
-def write_meteo(outpath, geo, ds, gtype="grid", ttype="time", input360=False):
-    lon = ds.longitude.values
+# Function to subset ERA data based on the mesh extent
+def subset_era_from_mesh(
+    era: xr.Dataset,
+    mesh: xr.Dataset,
+    input360: bool,
+    gtype: str,
+) -> xr.Dataset:
+    """
+    Selects a subset of ERA data that overlaps with the provided mesh's geographical extent.
+
+    :param era: The ERA dataset from which to select a subset.
+    :param mesh: The mesh dataset defining the geographical extent for the subset selection.
+    :param input360: A flag indicating whether the longitude should be adjusted to a 0-360 range.
+    :return: A subset of the ERA dataset that falls within the mesh's geographical extent.
+    """
+    xmin, xmax, ymin, ymax = mesh.x.min(), mesh.x.max(), mesh.y.min(), mesh.y.max()
     if input360:
-        lon[lon > 180] -= 360
-    lat = ds.latitude.values
-
+        xmin, xmax = np.mod(xmin + 360, 360), np.mod(xmax + 360, 360)
+        if xmax < xmin:
+            xmin, xmax = 0, 360
     if gtype == "grid":
-        nx1d = len(lon)
-        ny1d = len(lat)
-        x = np.tile(lon, ny1d).reshape(ny1d, nx1d).T.ravel()
-        y = np.tile(lat, nx1d)
-    else:
-        x = lon
-        y = lat
+        era_chunk = era.sel(longitude=slice(xmin, xmax), latitude=slice(ymax, ymin))
+    else:  # for 01280 grid
+        mask_lon = (era.longitude >= xmin) & (era.longitude <= xmax)
+        mask_lat = (era.latitude >= ymin) & (era.latitude <= ymax)
+        mask = mask_lon & mask_lat
+        indices = np.where(mask)[0]
+        era_chunk = era.isel(values=indices)
+    return era_chunk
 
-    if ttype == "time":
-        t0 = pd.Timestamp(ds.time.values[0])
-    elif ttype == "step":
-        t0 = pd.Timestamp(ds.time.values)
-        seconds = ds.step.values / 1e9
-        ds.time = pd.to_datetime(t0 + pd.Timedelta(seconds=seconds))
 
-    geo = xr.open_dataset(geo, engine="selafin")
+# Function to write meteorological data onto a mesh
+def write_meteo_on_mesh(
+    era_ds: xr.Dataset,
+    mesh: xr.Dataset,
+    file_out: str,
+    n_time_chunk: int,
+    n_node_chunk: int,
+    input360: bool = True,
+    gtype: str = "grid",
+    ttype: str = "time",
+) -> None:
+    """
+    Writes meteorological data from an ERA dataset onto a mesh and saves the result as a zarr file.
 
-    in_xy = np.vstack((x, y)).T
-    out_xy = np.vstack((geo.x, geo.y)).T
-    logger.info(f"Geting interp weights from {len(x)} on {len(geo.x)} nodes")
-    vert, wgts, u_x, g_x = get_weights(in_xy, out_xy)
+    :param era_ds: The ERA dataset with the meteorological data.
+    :param mesh: The mesh dataset representing the spatial domain.
+    :param file_out: The path to the output zarr file.
+    :param n_time_chunk: The size of the time chunks for processing.
+    :param n_node_chunk: The size of the node chunks for processing.
+    :param input360: A flag indicating whether the longitude should be adjusted to a 0-360 range.
+    """
+    # Create the temporary dummy zarr file
+    if os.path.exists(file_out):
+        shutil.rmtree(file_out)
+    x, y, tri = mesh.x.values, mesh.y.values, mesh.attrs["ikle2"] - 1
+    nnodes = len(x)
+    ntimes = len(era_ds.time)
+    zero = da.zeros((ntimes, nnodes), chunks=(n_time_chunk, n_node_chunk))
 
-    data_vars = {}
-    var_attrs = {}
-    node_dim = "node"
-    time_dim = "time"
-
+    # Define coordinates and data variables for the output dataset
     coords = {
-        "x": ("node", geo.x.data),
-        "y": ("node", geo.y.data),
+        "time": era_ds.time,
+        "node": np.arange(nnodes),
+        "lon": ("node", x),
+        "lat": ("node", y),
+        "triface_nodes": (("face_nodes", "three"), tri),
     }
+    data_vars = {}
+    for varin in era_ds.data_vars:
+        data_vars[varin] = (("time", "node"), zero)
+    xr.Dataset(data_vars=data_vars, coords=coords).to_zarr(file_out, compute=False)
 
+    # in the case of "tstps"
+    if ttype == "step":
+        t0 = pd.Timestamp(era_ds.time.values)
+        seconds = era_ds.step.values / 1e9
+        era_ds.time = pd.to_datetime(t0 + pd.Timedelta(seconds=seconds))
+
+    # Iterate over nodes in chunks and write data to zarr file
+    for ins in range(0, nnodes, n_node_chunk):
+        end_node = min(ins + n_node_chunk, nnodes)
+        node_chunk = np.arange(ins, end_node)
+        mesh_chunk = mesh.isel(node=slice(ins, end_node))
+        era_chunk = subset_era_from_mesh(era_ds, mesh_chunk, input360=input360, gtype=gtype)
+
+        # Get weights for interpolation
+        if gtype == "grid":
+            nx1d = len(era_chunk.longitude)
+            ny1d = len(era_chunk.latitude)
+            xx = np.tile(era_chunk.longitude, ny1d).reshape(ny1d, nx1d).T.ravel()
+            yy = np.tile(era_chunk.latitude, nx1d)
+        else:  # for O1280 grids
+            xx = era_chunk.longitude
+            yy = era_chunk.latitude
+            era_chunk = era_chunk.drop_vars(["number", "surface"])  # useless for meteo exports
+
+        in_xy = np.vstack((xx, yy)).T
+        if input360:
+            in_xy[:, 0][in_xy[:, 0] > 180] -= 360
+        out_xy = np.vstack((mesh_chunk.x, mesh_chunk.y)).T
+        vert, wgts, u_x, g_x = get_weights(in_xy, out_xy)  # Assuming get_weights is defined elsewhere
+
+        # Interpolate and write data for each variable and time chunk
+        for var_name in era_chunk.data_vars:
+            for it_chunk in range(0, ntimes, n_time_chunk):
+                t_end = min(it_chunk + n_time_chunk, ntimes)
+                time_chunk = era_chunk.time[it_chunk:t_end]
+                data_chunk = da.zeros((len(time_chunk), len(node_chunk)), chunks=(n_time_chunk, n_node_chunk))
+                for it, t_ in enumerate(time_chunk):
+                    tmp = np.ravel(np.transpose(era_chunk.isel(time=it_chunk + it)[var_name].values))
+                    data_chunk[it, :] = interp(tmp, vert, wgts, u_x, g_x)  # Assuming interp is defined elsewhere
+                coords = {"time": time_chunk, "node": node_chunk}
+                ds = xr.Dataset({var_name: (("time", "node"), data_chunk)}, coords=coords)
+                region = {"time": slice(it_chunk, t_end), "node": slice(ins, end_node)}
+                ds.to_zarr(file_out, mode="a-", region=region)
+
+
+def write_meteo_selafin(outpath, input_atm_zarr):
+    xatm = xr.open_dataset(input_atm_zarr, engine="zarr")
+    t0 = pd.Timestamp(xatm.time.values[0])
     # Define a mapping from the original variable names to the new ones
     var_map = {
-        "u10": ("WINDX", "WINDX", "M/S"),
-        "v10": ("WINDY", "WINDY", "M/S"),
-        "msl": ("PATM", "PATM", "PASCAL"),
-        "tmp": ("TAIR", "TEMPERATURE", "DEGREES C"),
+        "u10": ("WINDX", "M/S"),
+        "v10": ("WINDY", "M/S"),
+        "msl": ("PATM", "PASCAL"),
+        "tmp": ("TAIR", "DEGREES C"),
     }
-    final = []
-    logger.info(f"interpolating on {len(ds.time)} time steps")
-    netcdf_path = 'temporary_output.nc'
-    for it, t_ in enumerate(ds.time):
-        data_vars = {}
-        var_attrs = {}
-        for var in ds.data_vars:
-            if var in var_map:
-                # Attributes for the variable
-                var_attrs[var_map[var][0]] = (var_map[var][1], var_map[var][2])
-                # Data for the current time step
-                tmp = np.ravel(np.transpose(ds.isel(time=it)[var].values))
-                data = interp(tmp, vert, wgts, u_x, g_x)
-                data_vars[var_map[var][0]] = (node_dim, data)
-
-        # Create an xarray.Dataset for the current time step
-        atm_time_step = xr.Dataset(data_vars=data_vars, coords=coords)
-        atm_time_step = atm_time_step.assign_coords({time_dim: t_})
-        atm_time_step = atm_time_step.expand_dims(time_dim)
-
-        # Write the Dataset for the current time step to a NetCDF file
-        write_mode = 'w' if it == 0 else 'a'  # Overwrite if first iteration, append otherwise
-        atm_time_step.to_netcdf(netcdf_path, mode=write_mode, format='NETCDF4', unlimited_dims=[time_dim])
-
-    xatm = xr.open_dataset(netcdf_path)
+    var_attrs = {}
+    for var in xatm.data_vars:
+        if var in var_map:
+            # Attributes for the variable
+            var_attrs[var] = (var_map[var][0], var_map[var][1])
     # Add global attributes after concatenation
     xatm.attrs["date_start"] = [t0.year, t0.month, t0.day, t0.hour, t0.minute, t0.second]
-    xatm.attrs["ikle2"] = geo.attrs["ikle2"]
+    xatm.attrs["ikle2"] = xatm.triface_nodes.values + 1
     xatm.attrs["variables"] = {var: attrs for var, attrs in var_attrs.items()}
+    xatm = xatm.rename({"lon": "x", "lat": "y"})
+    xatm = xatm.drop_vars(["triface_nodes"])
     xatm.selafin.write(outpath)
+    remove(input_atm_zarr)
 
 
 def get_boundary_settings(boundary_type, glo_node, bnd_node):
@@ -906,15 +972,25 @@ class Telemac:
             # WRITE METEO FILE
             logger.info("saving meteo file.. ")
             meteo = os.path.join(path, "input_wind.slf")
+            atm_zarr = os.path.join(path, "atm.zarr")
+            geo_mesh = xr.open_dataset(geo, engine="selafin")
             if isinstance(self.meteo, list):
                 self.meteo = pmeteo.Meteo(self.meteo_source)
             else:
                 pass
 
             if self.meteo:
-                self.atm = write_meteo(
-                    meteo, geo, self.meteo.Dataset, gtype=self.gtype, ttype=self.ttype, input360=self.input360
+                write_meteo_on_mesh(
+                    self.meteo.Dataset,
+                    geo_mesh,
+                    atm_zarr,
+                    50,
+                    len(geo_mesh.x),
+                    gtype=self.gtype,
+                    ttype=self.ttype,
+                    input360=self.input360,
                 )
+                write_meteo_selafin(meteo, atm_zarr)
 
             # WRITE BOUNDARY FILE
             logger.info("saving boundary file.. ")
