@@ -200,7 +200,7 @@ def subset_era_from_mesh(
     xmin, xmax, ymin, ymax = mesh.x.min(), mesh.x.max(), mesh.y.min(), mesh.y.max()
     if input360:
         xmin, xmax = np.mod(xmin + 360, 360), np.mod(xmax + 360, 360)
-        if xmax < xmin:
+        if xmax <= xmin:
             xmin, xmax = 0, 360
     if gtype == "grid":
         era_chunk = era.sel(longitude=slice(xmin, xmax), latitude=slice(ymax, ymin))
@@ -279,9 +279,9 @@ def write_meteo_on_mesh(
             yy = era_chunk.latitude
             era_chunk = era_chunk.drop_vars(["number", "surface"])  # useless for meteo exports
 
-        in_xy = np.vstack((xx, yy)).T
         if input360:
-            in_xy[:, 0][in_xy[:, 0] > 180] -= 360
+            xx[xx > 180] -= 360
+        in_xy = np.vstack((xx, yy)).T
         out_xy = np.vstack((mesh_chunk.x, mesh_chunk.y)).T
         vert, wgts, u_x, g_x = get_weights(in_xy, out_xy)  # Assuming get_weights is defined elsewhere
 
