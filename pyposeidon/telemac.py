@@ -919,11 +919,20 @@ class Telemac:
             # adjust triangles orientation on the dateline
             IKLE2 = flip_triangles(X, Y, IKLE2, corrections)
 
-        if IKLE2 != self.mesh.Dataset.SCHISM_hgrid_face_nodes.data:
+        if IKLE2.shape != self.mesh.Dataset.SCHISM_hgrid_face_nodes.data.shape:
+            reassign_ikle = True
+        else:
+            if IKLE2 != self.mesh.Dataset.SCHISM_hgrid_face_nodes.data:
+                reassign_ikle = True
+            else:
+                reassign_ikle = False
+
+        if reassign_ikle:
             self.mesh.Dataset["SCHISM_hgrid_face_nodes"] = xr.Variable(
                 ("nSCHISM_hgrid_face", "nMaxSCHISM_hgrid_face_nodes"),
                 IKLE2,
             )
+
         # write mesh
         chezy = get_value(self, kwargs, "chezy", None)
         manning = get_value(self, kwargs, "manning", 0.027)
