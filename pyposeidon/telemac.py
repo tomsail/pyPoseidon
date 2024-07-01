@@ -190,6 +190,23 @@ def write_netcdf(ds, outpath):
     ds.to_netcdf(fileOut)
 
 
+
+def extract_t_elev_2D(
+        ds: xr.Dataset,
+        x: float,
+        y: float,
+        var: str = 'elev',
+        xstr: str = 'longitude',
+        ystr: str = 'latitude'):
+    lons, lats = ds[xstr].values, ds[ystr].values
+    indx, dist_ = closest_n_points(np.array([x, y]).T, 1, np.array([lons,lats]).T)
+    ds_ = ds.isel(node=indx[0])
+    elev_ = ds_[var].values
+    t_ = [pd.Timestamp(ti) for ti in ds_.time.values]
+    return pd.Series(elev_, index=t_), np.round(dist_, 2), float(ds_[xstr]),  float(ds_[ystr])
+
+
+
 # Function to subset ERA data based on the mesh extent
 def subset_era_from_mesh(
     era: xr.Dataset,
@@ -1402,12 +1419,35 @@ class Telemac:
                 f, header=None, sep=" ", index=False
             )  # 3rd-10th line: output points; x coordinate, y coordinate, station number, and station name
 
-    def get_output_data(self, **kwargs):
-        dic = self.__dict__
+    def get_output_data(
+            self,
+            model_output: str,
+            station_df: pd.DataFrame,
+            work_folder: str,
+            station_id_str:str = "ioc_code",
+            var = 'S',
+            xstr = 'x',
+            ystr = 'y'):
+        """
+        Get the output data from a TELEMAC output file.
+        write all the output data in parquet files in the @work_folder dir
 
-        dic.update(kwargs)
+        @param output_file: TELEMAC output file (can be either 1D or 2D)
+        @param station_df: DataFrame with the station information
+        @param work_folder: folder where the extracted time series are located
+        @param station_id_str: name of the column in station_df with the station id
+        @param var: name of the variable in the output file (by default S as FREE SURFACE)
+        @param xstr: name of the x coordinate in the output file
+        @param ystr: name of the y coordinate in the output file
+        @return: NONE
+        """
+        ds = xr.open_mfdataset(model_output)
+        logger.info("extracting parquet files from TELEMAC Selafin output \n")
+        for i_s, id_ in enumerate(station_df[station_id_str]):
+            s = station_df[station_df[station_id_str] == id_]
+            mod, d_, mlon, mlat = extract_t_elev_2D(ds, s.longitude.values[0], s.latitude.values[0], var, xstr, ystr)
+            mod.to_frame().to_parquet(os.path.join(work_folder, f"{id_}.parquet"))
 
-        self.data = data.get_output(**dic)
 
     def get_station_obs_data(self, **kwargs):
         self.station_obs_data = get_obs_data(self.obs, self.start_date, self.end_date)
@@ -1415,3 +1455,4 @@ class Telemac:
     def open_thalassa(self, **kwargs):
         # open a Thalassa instance to visualize the output
         return
+    
