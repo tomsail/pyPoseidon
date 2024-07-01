@@ -148,7 +148,7 @@ def contains_pole(x, y):
     return np.any(y == 90, axis=0)
 
 
-def fix_glob_connectivity(x, y, ikle2, corrections):
+def flip_triangles(x, y, ikle2, corrections):
     # Assuming slf.meshx, slf.meshy, and slf.ikle2 are NumPy arrays
     ikle2 = np.array(ikle2)
     # Ensure all triangles are CCW
@@ -159,19 +159,27 @@ def fix_glob_connectivity(x, y, ikle2, corrections):
     m_ = is_overlapping(ikle2, x)
     ikle2[m_] = flip(ikle2[m_])
 
-    # special case : pole triangles
-    pole_mask = contains_pole(x[ikle2].T, y[ikle2].T)
-
     # manual additional corrections
     if corrections is not None:
         for rev in corrections["reverse"]:
             ikle2[rev : rev + 1] = flip(ikle2[rev : rev + 1])
-        for rem in corrections["remove"]:
-            pole_mask[rem] = True
 
     # Check for negative determinant
     detmask = ~get_det_mask(ikle2, x, y)
     logger.debug(f"reversed {detmask.sum()} triangles")
+    logger.debug("[TEMPORARY FIX]: REMOVE THE POLE TRIANGLES")
+    return ikle2
+
+
+def remove_pole_triangles(x, y, ikle2, corrections):
+    # Assuming slf.meshx, slf.meshy, and slf.ikle2 are NumPy arrays
+    ikle2 = np.array(ikle2)
+    pole_mask = contains_pole(x[ikle2].T, y[ikle2].T)
+    # manual additional corrections
+    if corrections is not None:
+        for rem in corrections["remove"]:
+            pole_mask[rem] = True
+
     logger.debug(f"pole triangles: {np.where(pole_mask)[0]}")
     logger.debug("[TEMPORARY FIX]: REMOVE THE POLE TRIANGLES")
     return ikle2[~pole_mask, :]
@@ -870,7 +878,7 @@ class Telemac:
             logger.info("Manning file created..\n")
         ds.selafin.write(outpath)
 
-    def to_slf(self, outpath, global_=True, friction_type="chezy", **kwargs):
+    def to_slf(self, outpath, global_=True, flip_ = True, friction_type="chezy", **kwargs):
         corrections = get_value(self, kwargs, "mesh_corrections", {"reverse": [], "remove": []})
 
         X = self.mesh.Dataset.SCHISM_hgrid_node_x.data
@@ -888,10 +896,17 @@ class Telemac:
         remove(outpath)
 
         if global_:
+            # suppress the pole triangles (for now)
+            IKLE2 = remove_pole_triangles(X, Y, IKLE2, corrections)
+        if flip_:
             # adjust triangles orientation on the dateline
-            # and also suppress the pole triangles (for now)
-            IKLE2 = fix_glob_connectivity(X, Y, IKLE2, corrections)
+            IKLE2 = flip_triangles(X, Y, IKLE2, corrections)
 
+        if IKLE2 != self.mesh.Dataset.SCHISM_hgrid_face_nodes.data:
+            self.mesh.Dataset["SCHISM_hgrid_face_nodes"] = xr.Variable(
+                ("nSCHISM_hgrid_face", "nMaxSCHISM_hgrid_face_nodes"),
+                IKLE2,
+            )
         # write mesh
         chezy = get_value(self, kwargs, "chezy", None)
         manning = get_value(self, kwargs, "manning", 0.027)
@@ -952,6 +967,7 @@ class Telemac:
         path = get_value(self, kwargs, "rpath", "./telemac/")
         global_ = get_value(self, kwargs, "global", True)
         chezy = self.params.get("chezy", None)
+        flip_ = get_value(self, kwargs, "flip", True)
 
         if not os.path.exists(path):
             os.makedirs(path)
@@ -965,7 +981,7 @@ class Telemac:
 
             logger.info("saving geometry file.. ")
             geo = os.path.join(path, "geo.slf")
-            self.to_slf(geo, global_=global_, chezy=chezy)
+            self.to_slf(geo, global_=global_, flip_ = flip_, chezy=chezy)
             self.mesh.to_file(filename=os.path.join(path, "hgrid.gr3"))
             write_netcdf(self.mesh.Dataset, geo)
 
@@ -1251,7 +1267,6 @@ class Telemac:
         Returns:
             xr.Dataset: The xarray dataset.
         """
-        print(res_type)
         assert res_type in ("1D", "2D", "3D")
         ds = xr.open_dataset(file, engine="selafin")
         dic = {}
