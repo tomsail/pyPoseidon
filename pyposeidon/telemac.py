@@ -199,11 +199,11 @@ def extract_t_elev_2D(
         xstr: str = 'longitude',
         ystr: str = 'latitude'):
     lons, lats = ds[xstr].values, ds[ystr].values
-    indx, dist_ = closest_n_points(np.array([x, y]).T, 1, np.array([lons,lats]).T)
+    indx, _ = closest_n_points(np.array([x, y]).T, 1, np.array([lons,lats]).T)
     ds_ = ds.isel(node=indx[0])
     elev_ = ds_[var].values
     t_ = [pd.Timestamp(ti) for ti in ds_.time.values]
-    return pd.Series(elev_, index=t_), np.round(dist_, 2), float(ds_[xstr]),  float(ds_[ystr])
+    return pd.Series(elev_, index=t_), float(ds_[xstr]),  float(ds_[ystr])
 
 
 
@@ -1454,7 +1454,7 @@ class Telemac:
         logger.info("extracting parquet files from TELEMAC Selafin output \n")
         for i_s, id_ in enumerate(station_df[station_id_str]):
             s = station_df[station_df[station_id_str] == id_]
-            mod, d_, mlon, mlat = extract_t_elev_2D(ds, s.longitude.values[0], s.latitude.values[0], var, xstr, ystr)
+            mod, mlon, mlat = extract_t_elev_2D(ds, s.longitude.values[0], s.latitude.values[0], var, xstr, ystr)
             mod.to_frame().to_parquet(os.path.join(work_folder, f"{id_}.parquet"))
 
 
