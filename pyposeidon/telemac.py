@@ -1435,8 +1435,10 @@ class Telemac:
             work_folder: str,
             station_id_str:str = "ioc_code",
             var = 'S',
-            xstr = 'x',
-            ystr = 'y'):
+            df_xstr = 'lon',
+            df_ystr = 'lat',
+            model_xstr = 'x',
+            model_ystr = 'y'):
         """
         Get the output data from a TELEMAC output file.
         write all the output data in parquet files in the @work_folder dir
@@ -1446,15 +1448,17 @@ class Telemac:
         @param work_folder: folder where the extracted time series are located
         @param station_id_str: name of the column in station_df with the station id
         @param var: name of the variable in the output file (by default S as FREE SURFACE)
-        @param xstr: name of the x coordinate in the output file
-        @param ystr: name of the y coordinate in the output file
+        @param df_xstr: name of the x coordinate in the observations DataFrame (by default lon)
+        @param df_ystr: name of the y coordinate in the observations DataFrame (by default lat)
+        @param model_xstr: name of the x coordinate in the output Selafin file (by default x)
+        @param model_ystr: name of the y coordinate in the output Selafin file (by default y)
         @return: NONE
         """
         ds = xr.open_mfdataset(model_output)
         logger.info("extracting parquet files from TELEMAC Selafin output \n")
         for i_s, id_ in enumerate(station_df[station_id_str]):
             s = station_df[station_df[station_id_str] == id_]
-            mod, mlon, mlat = extract_t_elev_2D(ds, s.longitude.values[0], s.latitude.values[0], var, xstr, ystr)
+            mod, mlon, mlat = extract_t_elev_2D(ds, s[df_xstr].values[0], s[df_ystr].values[0], var, model_xstr, model_ystr)
             mod.to_frame().to_parquet(os.path.join(work_folder, f"{id_}.parquet"))
 
 
