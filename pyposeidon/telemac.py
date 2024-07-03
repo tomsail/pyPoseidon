@@ -133,7 +133,7 @@ def flip(tris):
 def is_overlapping(tris, meshx):
     PIR = 180
     x1, x2, x3 = meshx[tris].T
-    return np.logical_or(abs(x2 - x1) > PIR, abs(x3 - x1) > PIR)
+    return np.logical_or(abs(x2 - x1) > PIR, abs(x3 - x1) > PIR, abs(x3 - x3) > PIR)
 
 
 def get_det_mask(tris, meshx, meshy):
