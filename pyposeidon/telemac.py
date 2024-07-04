@@ -1328,10 +1328,6 @@ class Telemac:
 
         if self.monitor:
             logger.info("export observations file\n")
-            if isinstance(self.stations_mesh_id, dict):
-                stations = pd.DataFrame(self.stations_mesh_id)
-            elif isinstance(self.stations_mesh_id, pd.DataFrame):
-                stations = self.stations_mesh_id
             # idx = stations["gindex"] # not need for now
 
             res_1D = os.path.join(path, "results_1D.slf")
@@ -1341,8 +1337,7 @@ class Telemac:
             out_obs = os.path.join(path, "outputs", filename)
             remove(out_obs)
             export_xarray(xc, out_obs, chunk=chunk, remove_dir=remove_zarr)
-
-        logger.info("done with output netCDF files \n")
+        logger.info("done with output results files 1D/2D\n")
 
     def set_obs(self, **kwargs):
         path = get_value(self, kwargs, "rpath", "./telemac/")
@@ -1428,39 +1423,13 @@ class Telemac:
                 f, header=None, sep=" ", index=False
             )  # 3rd-10th line: output points; x coordinate, y coordinate, station number, and station name
 
-    def get_output_data(
-            self,
-            model_output: str,
-            station_df: pd.DataFrame,
-            work_folder: str,
-            station_id_str:str = "ioc_code",
-            var = 'S',
-            df_xstr = 'lon',
-            df_ystr = 'lat',
-            model_xstr = 'x',
-            model_ystr = 'y'):
-        """
-        Get the output data from a TELEMAC output file.
-        write all the output data in parquet files in the @work_folder dir
 
-        @param output_file: TELEMAC output file (can be either 1D or 2D)
-        @param station_df: DataFrame with the station information
-        @param work_folder: folder where the extracted time series are located
-        @param station_id_str: name of the column in station_df with the station id
-        @param var: name of the variable in the output file (by default S as FREE SURFACE)
-        @param df_xstr: name of the x coordinate in the observations DataFrame (by default lon)
-        @param df_ystr: name of the y coordinate in the observations DataFrame (by default lat)
-        @param model_xstr: name of the x coordinate in the output Selafin file (by default x)
-        @param model_ystr: name of the y coordinate in the output Selafin file (by default y)
-        @return: NONE
-        """
-        ds = xr.open_mfdataset(model_output)
-        logger.info("extracting parquet files from TELEMAC Selafin output \n")
-        for i_s, id_ in enumerate(station_df[station_id_str]):
-            s = station_df[station_df[station_id_str] == id_]
-            mod, mlon, mlat = extract_t_elev_2D(ds, s[df_xstr].values[0], s[df_ystr].values[0], var, model_xstr, model_ystr)
-            mod.to_frame().to_parquet(os.path.join(work_folder, f"{id_}.parquet"))
+    def get_output_data(self, **kwargs):
+        dic = self.__dict__
 
+        dic.update(kwargs)
+
+        self.data = data.get_output(**dic)
 
     def get_station_obs_data(self, **kwargs):
         self.station_obs_data = get_obs_data(self.obs, self.start_date, self.end_date)
