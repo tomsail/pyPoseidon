@@ -292,8 +292,6 @@ class TelemacResults:
 
         # export parquet time series
         if extract_TS:
-            obspath = rpath + "/outputs/obs/"
-            os.makedirs(obspath, exist_ok = True)
             if "stations_mesh_id" in p.__dict__:
                 if isinstance(p.stations_mesh_id, dict):
                     stations = pd.DataFrame(p.stations_mesh_id)
@@ -320,4 +318,4 @@ class TelemacResults:
                     model_xstr,
                     model_ystr
                 )
-                mod.to_frame().to_parquet(f"{obspath}{id_}.parquet")
+                mod.to_frame().to_parquet(f"{rpath}{id_}.parquet")
