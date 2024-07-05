@@ -1344,6 +1344,7 @@ class Telemac:
         nspool_sta = get_value(self, kwargs, "nspool_sta", 1)
         tg_database = get_value(self, kwargs, "obs", None)
         max_dist = get_value(self, kwargs, "max_dist", np.inf)
+        id_str = get_value(self, kwargs, "id_str", "ioc_code")
 
         if tg_database:
             logger.info("get stations from {}\n".format(tg_database))
@@ -1367,7 +1368,6 @@ class Telemac:
 
         ##### make sure lat/lon are floats
         tgn = tgn.astype({"latitude": float, "longitude": float, "location": str})
-
         ## FOR TIDE GAUGE MONITORING
 
         logger.info("set in-situ measurements locations \n")
@@ -1398,7 +1398,7 @@ class Telemac:
         stations.index += 1
         stations["gindex"] = mesh_index
         stations["unique_id"] = stations.index
-        stations["seaset_id"] = tgn.seaset_id.values[mask]
+        stations[id_str] = tgn[id_str].values[mask]
         stations["longitude"] = stations.lon.values[mask]
         stations["latitude"] = stations.lat.values[mask]
         # convert to MERCATOR coordinates
@@ -1419,7 +1419,7 @@ class Telemac:
             f.write(
                 f"{0} {int(self.params['duration'])} {self.params['tstep']}\n"
             )  # 2nd line: period 1: start time, end time and interval (in seconds)
-            stations.loc[:, ["x", "y", "unique_id", "seaset_id"]].to_csv(
+            stations.loc[:, ["x", "y", "unique_id", id_str]].to_csv(
                 f, header=None, sep=" ", index=False
             )  # 3rd-10th line: output points; x coordinate, y coordinate, station number, and station name
 
