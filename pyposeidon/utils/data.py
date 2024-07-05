@@ -220,7 +220,7 @@ class TelemacResults:
         res_type = kwargs.get("result_type", "2D")
         convert = kwargs.get("convert_results", True)
         extract_TS = kwargs.get("extract_TS", False)
-        station_id_str = kwargs.get("station_id_str", "seaset_id")
+        station_id_str = kwargs.get("id_str", "ioc_code")
 
         if res_type not in ["1D", "2D"]:
             raise ValueError("results_type needs to be '1D' or '2D'!")
@@ -302,7 +302,7 @@ class TelemacResults:
                 else:
                     raise ValueError("stations_mesh_id format not supported")
             elif "stations.csv" in os.listdir(rpath):
-                stations = pd.read_csv(os.path.join(rpath, "stations.csv"), index_col=0)
+                stations = pd.read_csv(os.path.join(rpath, "stations.csv"))
             elif "obs" in self.__dict__:
                 p.set_obs()
                 stations = p.stations_mesh_id
