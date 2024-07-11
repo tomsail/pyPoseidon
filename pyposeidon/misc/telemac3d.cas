@@ -9,6 +9,8 @@ BOUNDARY CONDITIONS FILE  = '{{ cli_file }}'
 2D RESULT FILE            = '{{ out_2D_file }}'
 FORMATTED DATA FILE 1     = '{{ formatted_data_file_1 }}'
 DEBUGGER={{ debugger }}
+{% if fortran %}FORTRAN FILE = 'user_fortran'
+{% endif %}
 /
 /----------------------------------------------
 /  GENERAL INFORMATIONS - OUTPUTS

@@ -5,6 +5,7 @@
     "out_3D_file": "res.3d.slf",
     "out_2D_file": "res.2d.slf",
     "formatted_data_file_1": "tsunamis.txt",
+    "fortran": false,
     "debugger": 0,
     "title": "TELEMAC 3D MODEL",
     "variables_3d_graphics": "Z,U,V,W",

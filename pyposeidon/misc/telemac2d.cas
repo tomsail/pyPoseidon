@@ -16,6 +16,8 @@ BINARY ATMOSPHERIC DATA FILE =
 TIME SERIES COORDINATES FILE 1 = '{{station_coords}}'{% endif %}
 /CHECKING THE MESH = YES
 /PARALLEL PROCESSORS = {{ ncsize }}
+{% if fortran %}FORTRAN FILE = 'user_fortran'
+{% endif %}
 /
 /----------------------------------------------
 /  GENERAL INFORMATIONS - OUTPUTS

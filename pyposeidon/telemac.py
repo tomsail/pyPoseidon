@@ -40,6 +40,7 @@ from pyposeidon.utils.norm import normalize_varnames
 from pyposeidon.utils.obs import get_obs_data
 from pyposeidon.utils.post import export_xarray
 from pyposeidon.utils.post import remove
+from pyposeidon.utils.cast import copy_files
 
 # telemac (needs telemac stack on conda)
 from telapy.api.t2d import Telemac2d
@@ -627,6 +628,9 @@ class Telemac:
         self.input360 = get_value(self, kwargs, "meteo_input360", False)
         self.meteo = get_value(self, kwargs, "meteo_source", None)
 
+        # custom user fortran
+        self.fortran = get_value(self, kwargs, "fortran", None)
+
         for attr, value in kwargs.items():
             if not hasattr(self, attr):
                 setattr(self, attr, value)
@@ -639,6 +643,7 @@ class Telemac:
     def config(self, config_file=None, output=False, **kwargs):
         dic = get_value(self, kwargs, "parameters", None)
         #        param_file = get_value(self,kwargs,'config_file',None)
+        path = get_value(self, kwargs, "rpath", "./telemac/")
 
         if config_file:
             # ---------------------------------------------------------------------
@@ -700,6 +705,22 @@ class Telemac:
         if self.monitor:
             params["monitor"] = True
 
+        # custom fortran file
+        if self.fortran:
+            params["fortran"] = True
+            if os.path.isfile(self.fortran):
+                file = os.path.split(self.fortran)[1]
+                os.makedirs(os.path.join(path, 'user_fortran'), exist_ok=True)
+                shutil.copy(self.fortran, os.path.join(path, 'user_fortran',  file))
+            elif os.path.isdir(self.fortran):
+                files_to_copy = [os.path.basename(x) for x in glob.glob(f"{self.fortran}/*.f*")]
+                files_to_copy += [os.path.basename(x) for x in glob.glob(f"{self.fortran}/*.F*")]
+                dest_name = os.path.join(path, 'user_fortran')
+                copy_files(dest_name,self.fortran,files_to_copy)
+            else:
+                raise ValueError(f"Couldn't find valid FORTRAN files in {self.fortran}")
+            logger.info(f"Copied FORTRAN files to {path}")
+
         # update
         if dic:
             for key in dic.keys():
@@ -715,7 +736,6 @@ class Telemac:
             # ---------------------------------------------------------------------
             logger.info("output " + self.module + " CAS file ...\n")
             # ---------------------------------------------------------------------
-            path = get_value(self, kwargs, "rpath", "./telemac/")
             write_cas(path, self.module, params)
 
     # ============================================================================================
@@ -745,12 +765,6 @@ class Telemac:
             ap["time"] = ap.time.values + pd.to_timedelta("1H")
 
             self.meteo.Dataset = xr.concat([self.meteo.Dataset, ap], dim="time")
-
-    def to_force(self, geo, outpath):
-        # # WRITE METEO FILE
-        logger.info("saving meteo file.. ")
-        out_file = os.path.join(outpath, "input_wind.slf")
-        write_meteo(out_file, geo, self.meteo.Dataset, gtype=self.gtype, ttype=self.ttype, input360=self.input360)
 
     # ============================================================================================
     # TPXO

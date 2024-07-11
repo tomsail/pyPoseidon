@@ -9,6 +9,7 @@
     "station_coords": "station.in",
     "computation_continued": false,
     "previous_computation_file": "placeholder.slf",
+    "fortran": false,
     "hotstart": true,
     "restart_file": "restart_2D.slf",
     "title": "TOMAWAC Model Simulation",

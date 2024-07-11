@@ -10,6 +10,7 @@
     "hotstart": true,
     "restart_file": "restart_2D.slf",
     "restart_tstep": -1,
+    "fortran": false,
     "title": "TELEMAC 2D Model",
     "ncsize": 1,
     "tstep_graph": 12,

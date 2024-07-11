@@ -4,8 +4,9 @@ GEOMETRY FILE : '{{geo_file}}'
 BOUNDARY CONDITIONS FILE : '{{cli_file}}'
 BINARY WINDS FILE : '{{inp_wind_file}}'
 WINDS FILE FORMAT : {{wind_file_format}}
-{% if hotstart %}
-GLOBAL RESULT FILE = {{ restart_file }}
+{% if hotstart %}GLOBAL RESULT FILE = {{ restart_file }}
+{% endif %}
+{% if fortran %}FORTRAN FILE = 'user_fortran'
 {% endif %}
 /------------------------------------------------------------------/
 2D RESULTS FILE : '{{out_2D_file}}'
