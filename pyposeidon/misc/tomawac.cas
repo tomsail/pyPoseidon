@@ -24,9 +24,9 @@ VARIABLES FOR 2D GRAPHIC PRINTOUTS : HM0;DMOY;TMOY;TPD;SPD;TPR8
 /------------------------------------------------------------------/
 /			GENERAL_PARAMETERS
 /------------------------------------------------------------------/
-NAMES OF VARIABLES : 'SURFACE PRESSUREUI              '; 
-'AIR TEMPERATURE DEGREES         '; 
-'WINDX           M/S             '; 
+NAMES OF VARIABLES : 'PATM            UI              ';
+'TAIR            DEGREES         ';
+'WINDX           M/S             ';
 'WINDY           M/S             '
 NUMBER OF TIME STEP : {{nb_tsteps}}
 TIME STEP : {{tstep}}

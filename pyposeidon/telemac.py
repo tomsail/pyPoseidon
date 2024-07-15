@@ -2,6 +2,7 @@
 TELEMAC model of pyposeidon. It controls the creation, execution & output  of a complete simulation based on SCHISM.
 
 """
+
 # Copyright 2018 European Union
 # This file is part of pyposeidon.
 # Licensed under the EUPL, Version 1.2 or – as soon they will be approved by the European Commission - subsequent versions of the EUPL (the "Licence").
@@ -191,21 +192,15 @@ def write_netcdf(ds, outpath):
     ds.to_netcdf(fileOut)
 
 
-
 def extract_t_elev_2D(
-        ds: xr.Dataset,
-        x: float,
-        y: float,
-        var: str = 'elev',
-        xstr: str = 'longitude',
-        ystr: str = 'latitude'):
+    ds: xr.Dataset, x: float, y: float, var: str = "elev", xstr: str = "longitude", ystr: str = "latitude"
+):
     lons, lats = ds[xstr].values, ds[ystr].values
-    indx, _ = closest_n_points(np.array([x, y]).T, 1, np.array([lons,lats]).T)
+    indx, _ = closest_n_points(np.array([x, y]).T, 1, np.array([lons, lats]).T)
     ds_ = ds.isel(node=indx[0])
     elev_ = ds_[var].values
     t_ = [pd.Timestamp(ti) for ti in ds_.time.values]
-    return pd.Series(elev_, index=t_), float(ds_[xstr]),  float(ds_[ystr])
-
+    return pd.Series(elev_, index=t_), float(ds_[xstr]), float(ds_[ystr])
 
 
 # Function to subset ERA data based on the mesh extent
@@ -294,6 +289,12 @@ def write_meteo_on_mesh(
         mesh_chunk = mesh.isel(node=slice(ins, end_node))
         era_chunk = subset_era_from_mesh(era_ds, mesh_chunk, input360=input360, gtype=gtype)
 
+        # drop needless coords
+        main_coords = [c for c in era_chunk.coords]
+        main_dims = [d for d in era_chunk.dims]
+        drop_coords = set(main_coords) - set(main_dims)
+        era_chunk = era_chunk.drop_vars(drop_coords)
+
         # Get weights for interpolation
         if gtype == "grid":
             nx1d = len(era_chunk.longitude)
@@ -303,7 +304,6 @@ def write_meteo_on_mesh(
         else:  # for O1280 grids
             xx = era_chunk.longitude
             yy = era_chunk.latitude
-            era_chunk = era_chunk.drop_vars(["number", "surface"])  # useless for meteo exports
 
         if input360:
             xx[xx > 180] -= 360
@@ -323,7 +323,7 @@ def write_meteo_on_mesh(
                 coords = {"time": time_chunk, "node": node_chunk}
                 ds = xr.Dataset({var_name: (("time", "node"), data_chunk)}, coords=coords)
                 region = {"time": slice(it_chunk, t_end), "node": slice(ins, end_node)}
-                ds.to_zarr(file_out, mode="a-", region=region)
+                ds.to_zarr(file_out, mode="a", region=region)
 
 
 def write_meteo_selafin(outpath, input_atm_zarr):
@@ -588,6 +588,7 @@ class Telemac:
                 self.end_date = pd.to_datetime(end_date)
                 self.time_frame = self.end_date - self.start_date
 
+        # if it is the first computation, set origin time (important for restart)
         if not hasattr(self, "rdate"):
             self.rdate = get_value(self, kwargs, "rdate", self.start_date)
 
@@ -710,13 +711,13 @@ class Telemac:
             params["fortran"] = True
             if os.path.isfile(self.fortran):
                 file = os.path.split(self.fortran)[1]
-                os.makedirs(os.path.join(path, 'user_fortran'), exist_ok=True)
-                shutil.copy(self.fortran, os.path.join(path, 'user_fortran',  file))
+                os.makedirs(os.path.join(path, "user_fortran"), exist_ok=True)
+                shutil.copy(self.fortran, os.path.join(path, "user_fortran", file))
             elif os.path.isdir(self.fortran):
                 files_to_copy = [os.path.basename(x) for x in glob.glob(f"{self.fortran}/*.f*")]
                 files_to_copy += [os.path.basename(x) for x in glob.glob(f"{self.fortran}/*.F*")]
-                dest_name = os.path.join(path, 'user_fortran')
-                copy_files(dest_name,self.fortran,files_to_copy)
+                dest_name = os.path.join(path, "user_fortran")
+                copy_files(dest_name, self.fortran, files_to_copy)
             else:
                 raise ValueError(f"Couldn't find valid FORTRAN files in {self.fortran}")
             logger.info(f"Copied FORTRAN files to {path}")
@@ -759,12 +760,26 @@ class Telemac:
         else:
             self.meteo = pmeteo.Meteo(**z)
 
-        if hasattr(self, "meteDataseto"):
-            # add 1 hour for Schism issue with end time
-            ap = self.meteo.Dataset.isel(time=-1)
-            ap["time"] = ap.time.values + pd.to_timedelta("1H")
-
-            self.meteo.Dataset = xr.concat([self.meteo.Dataset, ap], dim="time")
+    def to_force(self, geo, outpath):
+        # # WRITE METEO FILE
+        logger.info("saving meteo file.. ")
+        # define file names
+        atm_zarr = os.path.join(outpath, "atm.zarr")
+        geo_mesh = xr.open_dataset(geo, engine="selafin")
+        meteoFile = os.path.join(outpath, "input_wind.slf")
+        # temp zarr file
+        write_meteo_on_mesh(
+            self.meteo.Dataset,
+            geo_mesh,
+            atm_zarr,
+            50,
+            len(geo_mesh.x),
+            gtype=self.gtype,
+            ttype=self.ttype,
+            input360=self.input360,
+        )
+        # zarr to selafin
+        write_meteo_selafin(meteoFile, atm_zarr)
 
     # ============================================================================================
     # TPXO
@@ -909,7 +924,7 @@ class Telemac:
             logger.info("Manning file created..\n")
         ds.selafin.write(outpath)
 
-    def to_slf(self, outpath, global_=True, flip_ = True, friction_type="chezy", **kwargs):
+    def to_slf(self, outpath, global_=True, flip_=True, friction_type="chezy", **kwargs):
         corrections = get_value(self, kwargs, "mesh_corrections", {"reverse": [], "remove": []})
 
         X = self.mesh.Dataset.SCHISM_hgrid_node_x.data
@@ -936,7 +951,7 @@ class Telemac:
         if IKLE2.shape != self.mesh.Dataset.SCHISM_hgrid_face_nodes.data.shape:
             reassign_ikle = True
         else:
-            if IKLE2 != self.mesh.Dataset.SCHISM_hgrid_face_nodes.data:
+            if not np.array_equal(IKLE2, self.mesh.Dataset.SCHISM_hgrid_face_nodes.data):
                 reassign_ikle = True
             else:
                 reassign_ikle = False
@@ -1021,13 +1036,13 @@ class Telemac:
 
             logger.info("saving geometry file.. ")
             geo = os.path.join(path, "geo.slf")
-            self.to_slf(geo, global_=global_, flip_ = flip_, chezy=chezy)
+            self.to_slf(geo, global_=global_, flip_=flip_, chezy=chezy)
             self.mesh.to_file(filename=os.path.join(path, "hgrid.gr3"))
             write_netcdf(self.mesh.Dataset, geo)
 
             # WRITE METEO FILE
             logger.info("saving meteo file.. ")
-            meteo = os.path.join(path, "input_wind.slf")
+            meteoFile = os.path.join(path, "input_wind.slf")
             atm_zarr = os.path.join(path, "atm.zarr")
             geo_mesh = xr.open_dataset(geo, engine="selafin")
             if isinstance(self.meteo, list):
@@ -1046,11 +1061,11 @@ class Telemac:
                     ttype=self.ttype,
                     input360=self.input360,
                 )
-                write_meteo_selafin(meteo, atm_zarr)
+                write_meteo_selafin(meteoFile, atm_zarr)
 
             # WRITE BOUNDARY FILE
             logger.info("saving boundary file.. ")
-            domain = write_cli(geo, self.mesh.Dataset)
+            domain = write_cli(geo, self.mesh.Dataset, global_=global_)
             self.params["N_bc"] = len(domain[0])
 
             # WRITE CAS FILE
@@ -1359,6 +1374,7 @@ class Telemac:
         tg_database = get_value(self, kwargs, "obs", None)
         max_dist = get_value(self, kwargs, "max_dist", np.inf)
         id_str = get_value(self, kwargs, "id_str", "ioc_code")
+        offset = get_value(self, kwargs, "offset", 0)
 
         if tg_database:
             logger.info("get stations from {}\n".format(tg_database))
@@ -1385,6 +1401,9 @@ class Telemac:
         ## FOR TIDE GAUGE MONITORING
 
         logger.info("set in-situ measurements locations \n")
+
+        if self.mesh == "tri2d":
+            self.mesh = pmesh.set(type="tri2d", mesh_file=self.mesh_file)
 
         if not self.mesh.Dataset:
             logger.warning("no mesh available skipping \n")
@@ -1431,12 +1450,11 @@ class Telemac:
         with open(os.path.join(path, "station.in"), "w") as f:
             f.write(f"1 {stations.shape[0]}\n")  # 1st line: number of periods and number of points
             f.write(
-                f"{0} {int(self.params['duration'])} {self.params['tstep']}\n"
+                f"{0 + offset} {int(self.params['duration']) + offset} {self.params['tstep']}\n"
             )  # 2nd line: period 1: start time, end time and interval (in seconds)
             stations.loc[:, ["x", "y", "unique_id", id_str]].to_csv(
                 f, header=None, sep=" ", index=False
             )  # 3rd-10th line: output points; x coordinate, y coordinate, station number, and station name
-
 
     def get_output_data(self, **kwargs):
         dic = self.__dict__
@@ -1451,4 +1469,3 @@ class Telemac:
     def open_thalassa(self, **kwargs):
         # open a Thalassa instance to visualize the output
         return
-    
