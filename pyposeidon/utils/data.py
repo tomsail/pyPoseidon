@@ -2,6 +2,7 @@
 Data analysis module
 
 """
+
 # Copyright 2018 European Union
 # This file is part of pyposeidon.
 # Licensed under the EUPL, Version 1.2 or – as soon they will be approved by the European Commission - subsequent versions of the EUPL (the "Licence").
@@ -14,12 +15,9 @@ import os
 from pyposeidon.mesh import r2d
 import pyposeidon.model as pm
 from pyposeidon.tools import flat_list
-from pyposeidon.utils.get_value import get_value
-from pyposeidon.telemac import extract_t_elev_2D
-import datetime
+from pyposeidon.utils.cpoint import closest_n_points
 import xarray as xr
 import glob
-import sys
 import logging
 import json
 
@@ -39,6 +37,17 @@ def get_output(solver_name: str, **kwargs):
         raise ValueError(f"Unknown solver_name: {solver_name}")
     instance = solver_class(**kwargs)
     return instance
+
+
+def extract_t_elev_2D(
+    ds: xr.Dataset, x: float, y: float, var: str = "elev", xstr: str = "longitude", ystr: str = "latitude"
+):
+    lons, lats = ds[xstr].values, ds[ystr].values
+    indx, _ = closest_n_points(np.array([x, y]).T, 1, np.array([lons, lats]).T)
+    ds_ = ds.isel(node=indx[0])
+    elev_ = ds_[var].values
+    t_ = [pd.Timestamp(ti) for ti in ds_.time.values]
+    return pd.Series(elev_, index=t_), float(ds_[xstr]), float(ds_[ystr])
 
 
 class D3DResults:
@@ -208,6 +217,7 @@ class SchismResults:
             else:
                 self.Dataset = [xr.open_mfdataset(x, combine="by_coords", data_vars="minimal") for x in datai]
 
+
 class TelemacResults:
     def __init__(self, **kwargs):
         """
@@ -229,9 +239,7 @@ class TelemacResults:
         else:
             out_default = "out_2D.zarr"
 
-        folders = kwargs.get(
-            "folders", None
-        )
+        folders = kwargs.get("folders", None)
 
         if folders:
             self.folders = folders
@@ -265,16 +273,16 @@ class TelemacResults:
 
                 else:  # run merge output
                     p.results(
-                        filename = "stations.zarr",
-                        filename2d = "out_2D.zarr",
-                        remove_zarr = False # remove zarr files after tarballing
+                        filename="stations.zarr",
+                        filename2d="out_2D.zarr",
+                        remove_zarr=False,  # remove zarr files after tarballing
                     )
 
                     self.misc = p.misc
                     xdat = glob.glob(folder + "/outputs/" + out_default)
                     datai.append(xdat)  # append to list
-            else: # read from selafin file
-                xdat = glob.glob(folder +  f"/results_{res_type}.slf")
+            else:  # read from selafin file
+                xdat = glob.glob(folder + f"/results_{res_type}.slf")
                 datai.append(xdat)  # append to list
                 var, model_xstr, model_ystr = "S", "x", "y"
 
@@ -311,11 +319,6 @@ class TelemacResults:
             for i_s, id_ in enumerate(stations[station_id_str]):
                 s = stations[stations[station_id_str] == id_]
                 mod, mlon, mlat = extract_t_elev_2D(
-                    self.Dataset,
-                    s.longitude.values[0],
-                    s.latitude.values[0],
-                    var,
-                    model_xstr,
-                    model_ystr
+                    self.Dataset, s.longitude.values[0], s.latitude.values[0], var, model_xstr, model_ystr
                 )
                 mod.to_frame().to_parquet(f"{rpath}{id_}.parquet")
