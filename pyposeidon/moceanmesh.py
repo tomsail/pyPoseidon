@@ -18,6 +18,7 @@ import sys
 import oceanmesh as om
 import subprocess
 import shapely
+from shapely.geometry import LineString
 import shlex
 
 from pyposeidon.utils.spline import use_spline
@@ -435,6 +436,7 @@ def make_oceanmesh(df, **kwargs):
     alpha_slp = kwargs.get("alpha_slope", 30)
     alpha_wl = kwargs.get("alpha_wavelength", 30)
     plot = kwargs.get("plot", False)
+    minimum_area_mult = kwargs.get("minimum_area_mult", 4.0)
     #
     if interpolate:  # coastlines
         df = gset(df, **kwargs)
@@ -456,7 +458,7 @@ def make_oceanmesh(df, **kwargs):
     gdf.to_file(fshp, driver="ESRI Shapefile")
     #
     extent = om.Region(extent=(lon_min, lon_max, lat_min, lat_max), crs=crs)
-    shoreline = om.Shoreline(shp=fshp, bbox=extent.bbox, h0=res_min, crs=crs)
+    shoreline = om.Shoreline(shp=fshp, bbox=extent.bbox, h0=res_min, crs=crs, minimum_area_mult=minimum_area_mult)
     domain = om.signed_distance_function(shoreline)
     #
     if bgmesh is None or bgmesh == "om":
@@ -696,6 +698,15 @@ def om_to_xarray(points, cells, stereo_to_ll=True):
     return xr.merge([nod, dep, els, tbf.to_xarray()])  # total
 
 
+def create_circular_linear_ring(radius):
+    num_points = 32  # Number of points to approximate the circle
+    angles = np.linspace(0, 2 * np.pi, num_points)
+    ring_points = [(np.cos(angle) * radius, np.sin(angle) * radius) for angle in angles]
+    # Close the ring by adding the first point at the end
+    ring_points.append(ring_points[0])
+    return LineString(ring_points)
+
+
 def make_oceanmesh_global(df, **kwargs):
     logger.info("Executing oceanmesh")
     import matplotlib.pyplot as plt
@@ -714,6 +725,8 @@ def make_oceanmesh_global(df, **kwargs):
     alpha_slp = kwargs.get("alpha_slope", 30)
     alpha_wl = kwargs.get("alpha_wavelength", 30)
     plot = kwargs.get("plot", False)
+    minimum_area_mult = kwargs.get("minimum_area_mult", 4.0)
+    polar_circle = kwargs.get("polar_circle", 0)
 
     # add fixed points in the mesh (stations gauges)
     if tg_database:
@@ -737,6 +750,11 @@ def make_oceanmesh_global(df, **kwargs):
         df = gset(df, **kwargs)
     else:
         df = df
+
+    # create polar circle if needed
+    if polar_circle > 0:
+        hole_radius = polar_circle * 0.008725  # stereo distortion at the pole
+        df.loc[len(df), "geometry"] = create_circular_linear_ring(hole_radius)
 
     # set ESPG
     EPSG = 4326  # hardcoded
@@ -796,7 +814,9 @@ def make_oceanmesh_global(df, **kwargs):
             shoreline.plot(ax=ax)
 
         # stereo shoreline
-        shoreline_stereo = om.Shoreline(shp=fshp_ste, bbox=extent.bbox, h0=res_min, crs=crs, stereo=True)
+        shoreline_stereo = om.Shoreline(
+            shp=fshp_ste, bbox=extent.bbox, h0=res_min, crs=crs, stereo=True, minimum_area_mult=minimum_area_mult
+        )
         domain = om.signed_distance_function(shoreline_stereo)
         # add north pole in the mesh to avoid triangle over the north pole
         if domain.eval([[0, 0]]):
