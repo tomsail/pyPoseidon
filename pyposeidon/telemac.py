@@ -1080,8 +1080,9 @@ class Telemac:
         logger.info("output done\n")
         # ---------------------------------------------------------------------
 
-    def run(self, **kwargs):
+    def run(self, api=True, **kwargs):
         calc_dir = get_value(self, kwargs, "rpath", "./telemac/")
+        cpu = get_value(self, kwargs, "cpu", os.cpu_count())
         cwd = os.getcwd()
 
         # ---------------------------------------------------------------------
@@ -1095,31 +1096,34 @@ class Telemac:
             logger.warning("mpirun is not installed, ending.. \n")
             return
 
-        if self.module == "telemac2d":
-            # Creation of the instance Telemac2d
-            study = Telemac2d(cas_file, user_fortran=None, comm=comm, stdout=0, recompile=True)
-        elif self.module == "tomawac":
-            study = Tomawac(cas_file, user_fortran=None, comm=comm, stdout=0, recompile=True)
+        if api:
+            if self.module == "telemac2d":
+                # Creation of the instance Telemac2d
+                study = Telemac2d(cas_file, user_fortran=None, comm=comm, stdout=0, recompile=True)
+            elif self.module == "tomawac":
+                study = Tomawac(cas_file, user_fortran=None, comm=comm, stdout=0, recompile=True)
+            else:
+                raise ValueError("this module", self.module, "is not implemented yet!")
+
+            # Testing construction of variable list
+            _ = study.variables
+
+            study.set_case()
+            if self.module == "tomawac":
+                study.set("MODEL.RESULTFILE", "results_2D.slf")
+            # Initalization
+            study.init_state_default()
+            ntimesteps = study.get("MODEL.NTIMESTEPS")
+            pbar = ProgressBar(ntimesteps)
+            for it in range(ntimesteps):
+                study.run_one_time_step()
+                pbar.update(it)
+
+            # Ending the run
+            study.finalize()
+            pbar.finish()
         else:
-            raise ValueError("this module", self.module, "is not implemented yet!")
-
-        # Testing construction of variable list
-        _ = study.variables
-
-        study.set_case()
-        if self.module == "tomawac":
-            study.set("MODEL.RESULTFILE", "results_2D.slf")
-        # Initalization
-        study.init_state_default()
-        ntimesteps = study.get("MODEL.NTIMESTEPS")
-        pbar = ProgressBar(ntimesteps)
-        for it in range(ntimesteps):
-            study.run_one_time_step()
-            pbar.update(it)
-
-        # Ending the run
-        study.finalize()
-        pbar.finish()
+            os.system(f"{self.module}.py {cas_file} --ncsize {cpu} -s")
         #
         os.chdir(cwd)
 
