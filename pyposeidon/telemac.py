@@ -292,8 +292,6 @@ def write_meteo_on_mesh(
         # drop needless coords
         main_coords = [c for c in era_chunk.coords]
         main_dims = [d for d in era_chunk.dims]
-        drop_coords = set(main_coords) - set(main_dims)
-        era_chunk = era_chunk.drop_vars(drop_coords)
 
         # Get weights for interpolation
         if gtype == "grid":
@@ -302,13 +300,19 @@ def write_meteo_on_mesh(
             xx = np.tile(era_chunk.longitude, ny1d).reshape(ny1d, nx1d).T.ravel()
             yy = np.tile(era_chunk.latitude, nx1d)
         else:  # for O1280 grids
-            xx = era_chunk.longitude
-            yy = era_chunk.latitude
+            main_dims.extend(["longitude", "latitude"])
+            xx = era_chunk.longitude.compute()
+            yy = era_chunk.latitude.compute()
+
+        drop_coords = set(main_coords) - set(main_dims)
+        era_chunk = era_chunk.drop_vars(drop_coords)
 
         if input360:
             xx[xx > 180] -= 360
         in_xy = np.vstack((xx, yy)).T
         out_xy = np.vstack((mesh_chunk.x, mesh_chunk.y)).T
+
+        logger.debug("computing weigths for interpolation..")
         vert, wgts, u_x, g_x = get_weights(in_xy, out_xy)  # Assuming get_weights is defined elsewhere
 
         # Interpolate and write data for each variable and time chunk
