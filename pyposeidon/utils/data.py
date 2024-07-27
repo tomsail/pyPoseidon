@@ -231,6 +231,7 @@ class TelemacResults:
         convert = kwargs.get("convert_results", True)
         extract_TS = kwargs.get("extract_TS", False)
         station_id_str = kwargs.get("id_str", "ioc_code")
+        obs_file = kwargs.get("obs", None)
 
         if res_type not in ["1D", "2D"]:
             raise ValueError("results_type needs to be '1D' or '2D'!")
@@ -300,7 +301,9 @@ class TelemacResults:
 
         # export parquet time series
         if extract_TS:
-            if "stations_mesh_id" in p.__dict__:
+            if obs_file:
+                stations = pd.read_csv(obs_file)
+            elif "stations_mesh_id" in p.__dict__:
                 if isinstance(p.stations_mesh_id, dict):
                     stations = pd.DataFrame(p.stations_mesh_id)
                 elif isinstance(p.stations_mesh_id, pd.DataFrame):
@@ -309,6 +312,8 @@ class TelemacResults:
                     raise ValueError("stations_mesh_id format not supported")
             elif "stations.csv" in os.listdir(rpath):
                 stations = pd.read_csv(os.path.join(rpath, "stations.csv"))
+            elif "stations.csv" in os.listdir(folder):
+                stations = pd.read_csv(os.path.join(folder, "stations.csv"))
             elif "obs" in self.__dict__:
                 p.set_obs()
                 stations = p.stations_mesh_id
