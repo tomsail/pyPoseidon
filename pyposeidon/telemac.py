@@ -1096,12 +1096,19 @@ class Telemac:
             logger.warning("mpirun is not installed, ending.. \n")
             return
 
+        if self.fortran:
+            user_fortran = 'user_fortran'
+        else:
+            user_fortran = None
+
         if api:
             if self.module == "telemac2d":
                 # Creation of the instance Telemac2d
-                study = Telemac2d(cas_file, user_fortran=None, comm=comm, stdout=0, recompile=True)
+                study = Telemac2d(cas_file, user_fortran=user_fortran, comm=comm, stdout=0, recompile=True)
+            elif self.module == "telemac3d":
+                study = Telemac3d(cas_file, user_fortran=user_fortran, comm=comm, stdout=0, recompile=True)
             elif self.module == "tomawac":
-                study = Tomawac(cas_file, user_fortran=None, comm=comm, stdout=0, recompile=True)
+                study = Tomawac(cas_file, user_fortran=user_fortran, comm=comm, stdout=0, recompile=True)
             else:
                 raise ValueError("this module", self.module, "is not implemented yet!")
 
@@ -1123,6 +1130,7 @@ class Telemac:
             study.finalize()
             pbar.finish()
         else:
+            logger.info("no api mode, running telemac manually.. \n")
             os.system(f"{self.module}.py {cas_file} --ncsize {cpu} -s")
         #
         os.chdir(cwd)

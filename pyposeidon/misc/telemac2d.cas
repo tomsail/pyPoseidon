@@ -38,7 +38,6 @@ MASS-BALANCE = {{ 'YES' if mass_balance else 'NO' }}
 /  INITIAL CONDITIONS
 /----------------------------------------------
 /
-COMPUTATION CONTINUED = {{ 'YES' if computation_continued else 'NO' }} /Determines whether the computation under way is independent result or is following an earlier result
 {% if computation_continued %}PREVIOUS COMPUTATION FILE = {{ previous_computation_file }}
 PREVIOUS COMPUTATION FILE FORMAT = 'SERAFIND'
 {% else %}
@@ -53,7 +52,7 @@ INITIAL CONDITIONS  = '{{initial_conditions}}'     /ZERO ELEVATION,
 /---------------------------------------------------------------------
 /  CREATE RESTART CONDITIONS
 /---------------------------------------------------------------------
-{% if hotstart %}RESTART MODE = YES
+{% if hotstart %}
 RESTART FILE = {{ restart_file }}
 /RECORD NUMBER IN RESTART FILE = {{ restart_tstep }}
 RESTART FILE FORMAT = 'SERAFIND' {% endif %}
